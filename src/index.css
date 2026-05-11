@@ -411,6 +411,13 @@ thead th {
   background: linear-gradient(165deg, rgba(59, 24, 46, 0.84), rgba(39, 16, 39, 0.84));
 }
 
+.atv-card.recent-finished {
+  border-color: rgba(255, 108, 139, 0.62);
+  box-shadow:
+    0 0 0 1px rgba(255, 108, 139, 0.28),
+    0 16px 34px rgba(127, 22, 48, 0.46);
+}
+
 .atv-card header {
   display: flex;
   justify-content: space-between;
@@ -471,6 +478,12 @@ thead th {
   border-color: rgba(255, 201, 100, 0.45);
 }
 
+.badge.finished {
+  color: #ffadc1;
+  background: rgba(120, 28, 54, 0.34);
+  border-color: rgba(255, 126, 156, 0.5);
+}
+
 .badge.inactive {
   color: #ffd08d;
   background: rgba(107, 62, 19, 0.3);
@@ -498,6 +511,42 @@ thead th {
 
 .button-row.compact {
   gap: 0.36rem;
+}
+
+.recent-finish-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: fit-content;
+  color: #ffb8c9;
+  font-size: 0.86rem;
+  font-weight: 600;
+  border: 1px solid rgba(255, 117, 150, 0.44);
+  border-radius: 999px;
+  padding: 0.25rem 0.6rem;
+  background: rgba(105, 21, 46, 0.32);
+}
+
+.recent-finish-indicator::before {
+  content: '';
+  width: 0.56rem;
+  height: 0.56rem;
+  border-radius: 999px;
+  background: #ff5f86;
+  box-shadow: 0 0 0 0 rgba(255, 95, 134, 0.6);
+  animation: pulse-alert 1.25s ease-out infinite;
+}
+
+@keyframes pulse-alert {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 95, 134, 0.62);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(255, 95, 134, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 95, 134, 0);
+  }
 }
 
 .toast {

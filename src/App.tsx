@@ -72,6 +72,7 @@ function monthLabelFromKey(monthKey: string): string {
 
 type Tab = 'operations' | 'atvs' | 'finance'
 type ToastType = 'error' | 'success'
+const RECENT_FINISH_SIGNAL_MS = 15 * 60 * 1000
 
 interface ToastState {
   type: ToastType
@@ -106,6 +107,46 @@ async function maybeNotifyExpiry(atvName: string): Promise<void> {
       })
     }
   }
+}
+
+let expiryAudioContext: AudioContext | null = null
+
+async function playExpirySound(): Promise<void> {
+  const webkitWindow = window as Window & { webkitAudioContext?: typeof AudioContext }
+  const AudioContextCtor = window.AudioContext ?? webkitWindow.webkitAudioContext
+  if (!AudioContextCtor) {
+    return
+  }
+
+  if (!expiryAudioContext) {
+    expiryAudioContext = new AudioContextCtor()
+  }
+
+  const context = expiryAudioContext
+  if (context.state === 'suspended') {
+    await context.resume()
+  }
+
+  const now = context.currentTime
+  const scheduleTone = (frequency: number, offsetSeconds: number): void => {
+    const oscillator = context.createOscillator()
+    const gain = context.createGain()
+    oscillator.type = 'square'
+    oscillator.frequency.setValueAtTime(frequency, now + offsetSeconds)
+
+    gain.gain.setValueAtTime(0.0001, now + offsetSeconds)
+    gain.gain.exponentialRampToValueAtTime(0.22, now + offsetSeconds + 0.02)
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + offsetSeconds + 0.22)
+
+    oscillator.connect(gain)
+    gain.connect(context.destination)
+
+    oscillator.start(now + offsetSeconds)
+    oscillator.stop(now + offsetSeconds + 0.24)
+  }
+
+  scheduleTone(820, 0)
+  scheduleTone(620, 0.28)
 }
 
 function LoginPanel(props: {
@@ -281,7 +322,7 @@ function App(): ReactElement {
   useEffect(() => {
     const timeout = window.setTimeout(() => {
       setToast(null)
-    }, 3000)
+    }, toast?.type === 'error' ? 7000 : 3000)
 
     return () => {
       window.clearTimeout(timeout)
@@ -346,6 +387,8 @@ function App(): ReactElement {
   }, [loadData, userId])
 
   useEffect(() => {
+    const justExpiredAtvNames: string[] = []
+
     for (const session of openSessions) {
       if (session.status !== 'active') {
         continue
@@ -357,9 +400,25 @@ function App(): ReactElement {
 
       const atvName = atvs.find((atv) => atv.id === session.atv_id)?.name ?? 'cuatrimoto'
       notifiedExpiryRef.current.add(session.id)
+      justExpiredAtvNames.push(atvName)
       void maybeNotifyExpiry(atvName)
     }
-  }, [openSessions, atvs, tickMs])
+
+    if (justExpiredAtvNames.length > 0) {
+      const label =
+        justExpiredAtvNames.length === 1
+          ? `Tiempo finalizado: ${justExpiredAtvNames[0]}.`
+          : `Tiempo finalizado en ${justExpiredAtvNames.length} cuatrimotos.`
+      window.setTimeout(() => {
+        notify('error', label)
+      }, 0)
+      void playExpirySound().catch(() => {
+        window.setTimeout(() => {
+          notify('error', 'No se pudo reproducir el sonido de alerta en este navegador.')
+        }, 0)
+      })
+    }
+  }, [openSessions, atvs, tickMs, notify])
 
   useEffect(() => {
     const sessionsToClose = openSessions.filter(
@@ -764,6 +823,7 @@ function OperationsTab(props: {
           const openSession = openSessionByAtv.get(atv.id)
           const lastClosedSession = lastClosedSessionByAtv[atv.id]
           const atvColor = atv.color_hex ?? '#3b82f6'
+          const lastClosedEndedMs = lastClosedSession?.ended_at ? new Date(lastClosedSession.ended_at).getTime() : null
           const nowForSession =
             openSession?.status === 'paused'
               ? new Date(openSession.paused_at ?? openSession.updated_at).getTime()
@@ -772,29 +832,36 @@ function OperationsTab(props: {
           const isExpired = Boolean(openSession && remainingMs <= 0)
           const isRunning = openSession?.status === 'active'
           const isPaused = openSession?.status === 'paused'
+          const isRecentlyFinished = Boolean(
+            !openSession && lastClosedEndedMs !== null && tickMs - lastClosedEndedMs <= RECENT_FINISH_SIGNAL_MS,
+          )
 
           const availabilityLabel = !atv.active
             ? 'Fuera de servicio'
             : isExpired
               ? 'Cerrando...'
-            : isRunning
-              ? 'En uso'
-              : isPaused
-                ? 'Pausada'
-                : 'Disponible'
+              : isRecentlyFinished
+                ? 'Tiempo finalizado'
+                : isRunning
+                  ? 'En uso'
+                  : isPaused
+                    ? 'Pausada'
+                    : 'Disponible'
 
           const availabilityClass = !atv.active
             ? 'inactive'
             : isExpired
               ? 'paused'
-              : isRunning
-                ? 'busy'
-                : isPaused
-                  ? 'paused'
-                  : 'ok'
+              : isRecentlyFinished
+                ? 'finished'
+                : isRunning
+                  ? 'busy'
+                  : isPaused
+                    ? 'paused'
+                    : 'ok'
 
           return (
-            <article key={atv.id} className={`atv-card ${isExpired ? 'expired' : ''}`}>
+            <article key={atv.id} className={`atv-card ${isExpired ? 'expired' : ''} ${isRecentlyFinished ? 'recent-finished' : ''}`}>
               <header>
                 <h3>{atv.name}</h3>
                 <span className={`badge ${availabilityClass}`}>{availabilityLabel}</span>
@@ -880,6 +947,7 @@ function OperationsTab(props: {
                       {formatDateTime(lastClosedSession.ended_at)})
                     </p>
                   ) : null}
+                  {isRecentlyFinished ? <p className="recent-finish-indicator">Tiempo finalizado recientemente</p> : null}
                   <label>
                     Duracion (minutos)
                     <input
