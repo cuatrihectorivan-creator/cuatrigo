@@ -2,7 +2,7 @@ import { supabase } from '../lib/supabase'
 import type { Atv, FinanceByAtvRow, FinanceTotalRow, Profile, RideSession } from '../types/domain'
 
 const profileColumns = 'id,email,role,created_at,updated_at'
-const atvColumns = 'id,name,plate,active,base_minutes,base_price_cop,created_at,updated_at'
+const atvColumns = 'id,name,plate,active,color_hex,base_minutes,base_price_cop,created_at,updated_at'
 const sessionColumns =
   'id,atv_id,started_by,started_at,target_end_at,paused_at,ended_at,status,minutes_billed,amount_cop,created_at,updated_at'
 
@@ -21,7 +21,7 @@ export async function fetchMyProfile(userId: string): Promise<Profile | null> {
 }
 
 export async function fetchAtvs(): Promise<Atv[]> {
-  const { data, error } = await supabase.from('atvs').select(atvColumns).order('name')
+  const { data, error } = await supabase.from('atvs').select(atvColumns).is('deleted_at', null).order('name')
 
   if (error) {
     throw error
@@ -33,6 +33,7 @@ export async function fetchAtvs(): Promise<Atv[]> {
 export async function createAtv(input: {
   name: string
   plate?: string
+  colorHex?: string
   baseMinutes: number
   basePriceCop: number
 }): Promise<Atv> {
@@ -41,6 +42,7 @@ export async function createAtv(input: {
     .insert({
       name: input.name,
       plate: input.plate?.trim() ? input.plate.trim() : null,
+      color_hex: input.colorHex ?? '#3b82f6',
       base_minutes: input.baseMinutes,
       base_price_cop: input.basePriceCop,
       active: true,
@@ -57,14 +59,20 @@ export async function createAtv(input: {
 
 export async function updateAtvRates(
   atvId: string,
-  input: { baseMinutes: number; basePriceCop: number },
+  input: { baseMinutes: number; basePriceCop: number; colorHex?: string },
 ): Promise<void> {
+  const payload: { base_minutes: number; base_price_cop: number; color_hex?: string } = {
+    base_minutes: input.baseMinutes,
+    base_price_cop: input.basePriceCop,
+  }
+
+  if (input.colorHex) {
+    payload.color_hex = input.colorHex
+  }
+
   const { error } = await supabase
     .from('atvs')
-    .update({
-      base_minutes: input.baseMinutes,
-      base_price_cop: input.basePriceCop,
-    })
+    .update(payload)
     .eq('id', atvId)
 
   if (error) {
@@ -74,6 +82,16 @@ export async function updateAtvRates(
 
 export async function toggleAtvActive(atvId: string, active: boolean): Promise<void> {
   const { error } = await supabase.from('atvs').update({ active }).eq('id', atvId)
+
+  if (error) {
+    throw error
+  }
+}
+
+export async function deleteAtv(atvId: string): Promise<void> {
+  const { error } = await supabase.rpc('delete_atv', {
+    p_atv_id: atvId,
+  })
 
   if (error) {
     throw error
@@ -128,6 +146,16 @@ export async function stopSession(sessionId: string): Promise<void> {
   if (error) {
     throw error
   }
+}
+
+export async function refreshExpiredSessions(): Promise<number> {
+  const { data, error } = await supabase.rpc('refresh_expired_sessions')
+
+  if (error) {
+    throw error
+  }
+
+  return Number(data ?? 0)
 }
 
 export async function pauseSession(sessionId: string): Promise<void> {

@@ -45,6 +45,7 @@ Revisa:
 - `supabase/migrations/0002_cron_and_notifications.sql`
 - `supabase/migrations/0003_add_paused_session_status.sql`
 - `supabase/migrations/0003_sessions_pause_restart_and_finance_reset.sql`
+- `supabase/migrations/0004_expiry_precision_soft_delete_and_colors.sql`
 - `supabase/README.md`
 
 ## Deploy en Cloudflare Pages

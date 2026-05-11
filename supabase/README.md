@@ -19,6 +19,7 @@ Aplica en orden:
 2. `supabase/migrations/0002_cron_and_notifications.sql`
 3. `supabase/migrations/0003_add_paused_session_status.sql`
 4. `supabase/migrations/0003_sessions_pause_restart_and_finance_reset.sql`
+5. `supabase/migrations/0004_expiry_precision_soft_delete_and_colors.sql`
 
 Puedes hacerlo desde SQL Editor o con Supabase CLI.
 

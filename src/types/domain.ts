@@ -14,6 +14,7 @@ export interface Atv {
   name: string
   plate: string | null
   active: boolean
+  color_hex: string | null
   base_minutes: number
   base_price_cop: number
   created_at: string
