@@ -298,6 +298,26 @@ function App(): ReactElement {
   const openBrincaSessionById = useMemo(() => {
     return new Map(brincaOpenSessions.map((session) => [session.id, session]))
   }, [brincaOpenSessions])
+  const comboMotoSessionIds = useMemo(() => {
+    const ids = new Set<string>()
+    for (const combo of combos) {
+      if (combo.status === 'cancelled' || !combo.moto_session_id) {
+        continue
+      }
+      ids.add(combo.moto_session_id)
+    }
+    return ids
+  }, [combos])
+  const comboBrincaSessionIds = useMemo(() => {
+    const ids = new Set<string>()
+    for (const combo of combos) {
+      if (combo.status === 'cancelled' || !combo.brinca_session_id) {
+        continue
+      }
+      ids.add(combo.brinca_session_id)
+    }
+    return ids
+  }, [combos])
 
   const activeAtvCount = openSessions.filter((session) => session.status === 'active').length
   const activeBrincaCount = brincaOpenSessions.filter((session) => session.status === 'active').length
@@ -828,7 +848,7 @@ function App(): ReactElement {
 
   const handleResetFinance = useCallback(async () => {
     const deleted = await resetFinanceData()
-    notify('success', `Finanzas reiniciadas. Sesiones eliminadas: ${deleted}`)
+    notify('success', `Finanzas reiniciadas. Registros historicos eliminados: ${deleted}`)
     await loadData()
   }, [loadData, notify])
 
@@ -939,6 +959,7 @@ function App(): ReactElement {
           atvs={atvs}
           lastClosedSessionByAtv={lastClosedSessionByAtv}
           openSessionByAtv={openSessionByAtv}
+          comboMotoSessionIds={comboMotoSessionIds}
           tickMs={tickMs}
           onStartSession={handleStartSession}
           onStopSession={handleStopSession}
@@ -954,6 +975,7 @@ function App(): ReactElement {
           canEdit={isAdmin}
           settings={brincaSettings}
           openSessions={brincaOpenSessions}
+          comboBrincaSessionIds={comboBrincaSessionIds}
           tickMs={tickMs}
           onUpdateSettings={handleUpdateBrincaSettings}
           onStartSession={handleStartBrincaSession}
@@ -1022,6 +1044,7 @@ function OperationsTab(props: {
   atvs: Atv[]
   lastClosedSessionByAtv: Record<string, RideSession>
   openSessionByAtv: Map<string, RideSession>
+  comboMotoSessionIds: ReadonlySet<string>
   tickMs: number
   onStartSession: (atvId: string, durationMinutes: number) => Promise<void>
   onStopSession: (sessionId: string) => Promise<void>
@@ -1034,6 +1057,7 @@ function OperationsTab(props: {
     atvs,
     lastClosedSessionByAtv,
     openSessionByAtv,
+    comboMotoSessionIds,
     tickMs,
     onStartSession,
     onStopSession,
@@ -1140,6 +1164,7 @@ function OperationsTab(props: {
       <div className="card-grid">
         {atvs.map((atv) => {
           const openSession = openSessionByAtv.get(atv.id)
+          const isComboSession = openSession ? comboMotoSessionIds.has(openSession.id) : false
           const lastClosedSession = lastClosedSessionByAtv[atv.id]
           const atvColor = atv.color_hex ?? '#3b82f6'
           const lastClosedEndedMs = lastClosedSession?.ended_at ? new Date(lastClosedSession.ended_at).getTime() : null
@@ -1209,6 +1234,7 @@ function OperationsTab(props: {
                     {isExpired ? 'Vencido' : isPaused ? 'Tiempo restante (pausado)' : 'Tiempo restante'}:{' '}
                     {formatRemainingClock(remainingMs)}
                   </p>
+                  {isComboSession ? <p className="meta">Sesion de combo: no permite agregar tiempo.</p> : null}
                   {isExpired ? <p className="meta danger-text">Vencido {formatTimeAgo(openSession.target_end_at, tickMs)}.</p> : null}
 
                   <div className="button-row">
@@ -1235,7 +1261,7 @@ function OperationsTab(props: {
                     <button
                       type="button"
                       className="secondary"
-                      disabled={startingFor === openSession.id || isExpired}
+                      disabled={startingFor === openSession.id || isExpired || isComboSession}
                       onClick={() => void handleExtend(openSession.id)}
                     >
                       + Minutos
@@ -1304,6 +1330,7 @@ function BrincaTab(props: {
   canEdit: boolean
   settings: BrincaSettings | null
   openSessions: BrincaSession[]
+  comboBrincaSessionIds: ReadonlySet<string>
   tickMs: number
   onUpdateSettings: (baseMinutes: number, basePriceCop: number) => Promise<void>
   onStartSession: (childName: string, durationMinutes: number) => Promise<void>
@@ -1317,6 +1344,7 @@ function BrincaTab(props: {
     canEdit,
     settings,
     openSessions,
+    comboBrincaSessionIds,
     tickMs,
     onUpdateSettings,
     onStartSession,
@@ -1520,6 +1548,7 @@ function BrincaTab(props: {
           </article>
         ) : (
           openSessions.map((session) => {
+            const isComboSession = comboBrincaSessionIds.has(session.id)
             const nowForSession =
               session.status === 'paused'
                 ? new Date(session.paused_at ?? session.updated_at).getTime()
@@ -1547,6 +1576,7 @@ function BrincaTab(props: {
                   {isExpired ? 'Vencido' : isPaused ? 'Tiempo restante (pausado)' : 'Tiempo restante'}:{' '}
                   {formatRemainingClock(remainingMs)}
                 </p>
+                {isComboSession ? <p className="meta">Sesion de combo: no permite agregar tiempo.</p> : null}
 
                 <div className="button-row">
                   {isRunning ? (
@@ -1572,7 +1602,7 @@ function BrincaTab(props: {
                   <button
                     type="button"
                     className="secondary"
-                    disabled={busySessionId === session.id || isExpired}
+                    disabled={busySessionId === session.id || isExpired || isComboSession}
                     onClick={() => void handleExtendSession(session.id)}
                   >
                     + Minutos
@@ -2267,7 +2297,7 @@ function FinanceTab(props: {
     }
 
     const confirmed = window.confirm(
-      'Esto eliminara sesiones cerradas y sus cobros historicos para reiniciar finanzas. Esta seguro?',
+      'Esto eliminara historial financiero cerrado de Motos, Brinca y Combos. Esta seguro?',
     )
     if (!confirmed) {
       return

@@ -25,6 +25,8 @@ Aplica en orden:
 8. `supabase/migrations/0007_combos.sql`
 9. `supabase/migrations/0008_minimum_price_floors.sql`
 10. `supabase/migrations/0009_combo_discount_and_finance.sql`
+11. `supabase/migrations/0010_reset_finance_all_modules.sql`
+12. `supabase/migrations/0011_block_combo_extension_rpc.sql`
 
 Puedes hacerlo desde SQL Editor o con Supabase CLI.
 

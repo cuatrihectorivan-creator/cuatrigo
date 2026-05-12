@@ -51,6 +51,8 @@ Revisa:
 - `supabase/migrations/0007_combos.sql`
 - `supabase/migrations/0008_minimum_price_floors.sql`
 - `supabase/migrations/0009_combo_discount_and_finance.sql`
+- `supabase/migrations/0010_reset_finance_all_modules.sql`
+- `supabase/migrations/0011_block_combo_extension_rpc.sql`
 - `supabase/README.md`
 
 ## Deploy en Cloudflare Pages
