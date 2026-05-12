@@ -49,3 +49,28 @@ export interface FinanceTotalRow {
   minutes_total: number
   amount_total_cop: number
 }
+
+export interface BrincaSettings {
+  id: boolean
+  base_minutes: number
+  base_price_cop: number
+  created_at: string
+  updated_at: string
+}
+
+export interface BrincaSession {
+  id: string
+  child_name: string
+  started_by: string
+  started_at: string
+  target_end_at: string
+  paused_at: string | null
+  ended_at: string | null
+  status: SessionStatus
+  base_minutes: number
+  base_price_cop: number
+  minutes_billed: number | null
+  amount_cop: number | null
+  created_at: string
+  updated_at: string
+}

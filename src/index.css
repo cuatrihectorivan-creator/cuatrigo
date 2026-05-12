@@ -396,13 +396,22 @@ thead th {
   height: auto;
   aspect-ratio: 16 / 10;
   object-fit: cover;
+  filter: grayscale(1) contrast(1.08) brightness(0.92);
+}
+
+.atv-image-shade {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.34;
+  mix-blend-mode: multiply;
 }
 
 .atv-image-tint {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  opacity: 0.28;
+  opacity: 0.7;
   mix-blend-mode: color;
 }
 
