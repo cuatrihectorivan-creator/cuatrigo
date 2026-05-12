@@ -661,7 +661,7 @@ function App(): ReactElement {
   }, [notify])
 
   const handleAddAtv = useCallback(
-    async (input: { name: string; plate?: string; colorHex?: string; baseMinutes: number; basePriceCop: number }) => {
+    async (input: { name: string; colorHex?: string; baseMinutes: number; basePriceCop: number }) => {
       await createAtv(input)
       notify('success', 'Cuatrimoto creada')
       await loadData()
@@ -1217,7 +1217,6 @@ function OperationsTab(props: {
                 <span className="atv-image-tint" style={{ backgroundColor: atvColor }} aria-hidden="true" />
               </div>
 
-              <p className="meta">Placa: {atv.plate ?? 'sin placa'}</p>
               <p className="meta">
                 Color: <span className="color-chip" style={{ backgroundColor: atvColor }} aria-hidden="true" /> {atvColor.toUpperCase()}
               </p>
@@ -1978,7 +1977,7 @@ function CombosTab(props: {
 function AtvAdminTab(props: {
   atvs: Atv[]
   canEdit: boolean
-  onAddAtv: (input: { name: string; plate?: string; colorHex?: string; baseMinutes: number; basePriceCop: number }) => Promise<void>
+  onAddAtv: (input: { name: string; colorHex?: string; baseMinutes: number; basePriceCop: number }) => Promise<void>
   onUpdateRates: (atvId: string, input: { baseMinutes: number; basePriceCop: number; colorHex?: string }) => Promise<void>
   onToggleActive: (atvId: string, active: boolean) => Promise<void>
   onDeleteAtv: (atvId: string) => Promise<void>
@@ -1986,7 +1985,6 @@ function AtvAdminTab(props: {
 }): ReactElement {
   const { atvs, canEdit, onAddAtv, onUpdateRates, onToggleActive, onDeleteAtv, onError } = props
   const [name, setName] = useState('')
-  const [plate, setPlate] = useState('')
   const [colorHex, setColorHex] = useState('#3b82f6')
   const [baseMinutes, setBaseMinutes] = useState(10)
   const [basePriceCop, setBasePriceCop] = useState(10000)
@@ -2013,13 +2011,11 @@ function AtvAdminTab(props: {
     try {
       await onAddAtv({
         name,
-        plate,
         colorHex,
         baseMinutes,
         basePriceCop: Math.max(10000, Math.floor(basePriceCop)),
       })
       setName('')
-      setPlate('')
       setColorHex('#3b82f6')
       setBaseMinutes(10)
       setBasePriceCop(10000)
@@ -2105,11 +2101,6 @@ function AtvAdminTab(props: {
         </label>
 
         <label>
-          Placa
-          <input value={plate} onChange={(event) => setPlate(event.target.value)} placeholder="ABC123" />
-        </label>
-
-        <label>
           Color
           <input type="color" value={colorHex} onChange={(event) => setColorHex(event.target.value)} />
         </label>
@@ -2146,7 +2137,6 @@ function AtvAdminTab(props: {
           <thead>
             <tr>
               <th>Moto</th>
-              <th>Placa</th>
               <th>Color</th>
               <th>Base min</th>
               <th>Base COP</th>
@@ -2157,27 +2147,31 @@ function AtvAdminTab(props: {
           <tbody>
             {atvs.map((atv) => {
               const draft = rateDrafts[atv.id]
+              const effectiveColor = draft?.colorHex ?? atv.color_hex ?? '#3b82f6'
               return (
                 <tr key={atv.id}>
                   <td>{atv.name}</td>
-                  <td>{atv.plate ?? '-'}</td>
                   <td>
-                    <input
-                      type="color"
-                      value={draft?.colorHex ?? atv.color_hex ?? '#3b82f6'}
-                      disabled={!canEdit}
-                      onChange={(event) => {
-                        const value = event.target.value
-                        setRateDrafts((current) => ({
-                          ...current,
-                          [atv.id]: {
-                            baseMinutes: current[atv.id]?.baseMinutes ?? atv.base_minutes,
-                            basePriceCop: current[atv.id]?.basePriceCop ?? atv.base_price_cop,
-                            colorHex: value,
-                          },
-                        }))
-                      }}
-                    />
+                    <div className="color-editor">
+                      <span className="color-preview-square" style={{ backgroundColor: effectiveColor }} aria-hidden="true" />
+                      <input
+                        type="color"
+                        value={effectiveColor}
+                        disabled={!canEdit}
+                        aria-label={`Color de ${atv.name}`}
+                        onChange={(event) => {
+                          const value = event.target.value
+                          setRateDrafts((current) => ({
+                            ...current,
+                            [atv.id]: {
+                              baseMinutes: current[atv.id]?.baseMinutes ?? atv.base_minutes,
+                              basePriceCop: current[atv.id]?.basePriceCop ?? atv.base_price_cop,
+                              colorHex: value,
+                            },
+                          }))
+                        }}
+                      />
+                    </div>
                   </td>
                   <td>
                     <input

@@ -145,6 +145,30 @@ select {
   outline: none;
 }
 
+input[type='color'] {
+  width: 2.9rem;
+  min-width: 2.9rem;
+  height: 2rem;
+  padding: 0.14rem;
+  border-radius: 10px;
+  cursor: pointer;
+  background: rgba(8, 14, 36, 0.92);
+}
+
+input[type='color']::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+input[type='color']::-webkit-color-swatch {
+  border: none;
+  border-radius: 7px;
+}
+
+input[type='color']::-moz-color-swatch {
+  border: none;
+  border-radius: 7px;
+}
+
 input:focus {
   border-color: rgba(116, 188, 255, 0.85);
   box-shadow: 0 0 0 3px rgba(53, 161, 255, 0.18);
@@ -520,6 +544,20 @@ thead th {
   margin-right: 0.4rem;
   border: 1px solid rgba(240, 248, 255, 0.46);
   vertical-align: -0.08rem;
+}
+
+.color-editor {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.color-preview-square {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 4px;
+  border: 1px solid rgba(240, 248, 255, 0.58);
+  box-shadow: 0 0 0 1px rgba(50, 98, 188, 0.24);
 }
 
 .clock {

@@ -47,7 +47,6 @@ export async function fetchAtvs(): Promise<Atv[]> {
 
 export async function createAtv(input: {
   name: string
-  plate?: string
   colorHex?: string
   baseMinutes: number
   basePriceCop: number
@@ -56,7 +55,6 @@ export async function createAtv(input: {
     .from('atvs')
     .insert({
       name: input.name,
-      plate: input.plate?.trim() ? input.plate.trim() : null,
       color_hex: input.colorHex ?? '#3b82f6',
       base_minutes: input.baseMinutes,
       base_price_cop: input.basePriceCop,
