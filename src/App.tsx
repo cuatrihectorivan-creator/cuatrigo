@@ -2,14 +2,17 @@ import type { FormEvent, ReactElement } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { User } from '@supabase/supabase-js'
 import {
+  cancelCombo,
   computeBrincaFinance,
   computeFinance,
+  createCombo,
   createAtv,
   deleteAtv,
   extendBrincaSession,
   extendSession,
   fetchAtvs,
   fetchBrincaSettings,
+  fetchCombos,
   fetchCompletedBrincaSessionsByRange,
   fetchOpenBrincaSessions,
   fetchCompletedSessionsByRange,
@@ -24,6 +27,8 @@ import {
   resumeBrincaSession,
   restartSession,
   resumeSession,
+  startComboBrincaLeg,
+  startComboMotoLeg,
   startBrincaSession,
   stopBrincaSession,
   startSession,
@@ -46,6 +51,8 @@ import type {
   Atv,
   BrincaSession,
   BrincaSettings,
+  Combo,
+  ComboStartMode,
   FinanceByAtvRow,
   FinanceTotalRow,
   Profile,
@@ -90,7 +97,7 @@ function monthLabelFromKey(monthKey: string): string {
   return new Intl.DateTimeFormat('es-CO', { month: 'long', year: 'numeric' }).format(date)
 }
 
-type Tab = 'operations' | 'brinca' | 'atvs' | 'finance'
+type Tab = 'operations' | 'brinca' | 'combos' | 'atvs' | 'finance'
 type ToastType = 'error' | 'success'
 const RECENT_FINISH_SIGNAL_MS = 15 * 60 * 1000
 
@@ -148,25 +155,28 @@ async function playExpirySound(): Promise<void> {
   }
 
   const now = context.currentTime
-  const scheduleTone = (frequency: number, offsetSeconds: number): void => {
+  const scheduleTone = (frequency: number, offsetSeconds: number, durationSeconds: number): void => {
     const oscillator = context.createOscillator()
     const gain = context.createGain()
-    oscillator.type = 'square'
+    oscillator.type = 'triangle'
     oscillator.frequency.setValueAtTime(frequency, now + offsetSeconds)
 
     gain.gain.setValueAtTime(0.0001, now + offsetSeconds)
-    gain.gain.exponentialRampToValueAtTime(0.22, now + offsetSeconds + 0.02)
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + offsetSeconds + 0.22)
+    gain.gain.exponentialRampToValueAtTime(0.28, now + offsetSeconds + 0.03)
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + offsetSeconds + durationSeconds)
 
     oscillator.connect(gain)
     gain.connect(context.destination)
 
     oscillator.start(now + offsetSeconds)
-    oscillator.stop(now + offsetSeconds + 0.24)
+    oscillator.stop(now + offsetSeconds + durationSeconds + 0.02)
   }
 
-  scheduleTone(820, 0)
-  scheduleTone(620, 0.28)
+  for (let repetition = 0; repetition < 4; repetition += 1) {
+    const offset = repetition * 0.72
+    scheduleTone(860, offset, 0.24)
+    scheduleTone(620, offset + 0.3, 0.28)
+  }
 }
 
 function LoginPanel(props: {
@@ -261,6 +271,7 @@ function App(): ReactElement {
   const [brincaOpenSessions, setBrincaOpenSessions] = useState<BrincaSession[]>([])
   const [brincaRecentSessions, setBrincaRecentSessions] = useState<BrincaSession[]>([])
   const [brincaFinanceTotal, setBrincaFinanceTotal] = useState<FinanceTotalRow | null>(null)
+  const [combos, setCombos] = useState<Combo[]>([])
   const [recentSessions, setRecentSessions] = useState<RideSession[]>([])
   const [financeByAtv, setFinanceByAtv] = useState<FinanceByAtvRow[]>([])
   const [financeTotal, setFinanceTotal] = useState<FinanceTotalRow | null>(null)
@@ -278,6 +289,12 @@ function App(): ReactElement {
   const openSessionByAtv = useMemo(() => {
     return new Map(openSessions.map((session) => [session.atv_id, session]))
   }, [openSessions])
+  const openMotoSessionById = useMemo(() => {
+    return new Map(openSessions.map((session) => [session.id, session]))
+  }, [openSessions])
+  const openBrincaSessionById = useMemo(() => {
+    return new Map(brincaOpenSessions.map((session) => [session.id, session]))
+  }, [brincaOpenSessions])
 
   const activeAtvCount = openSessions.filter((session) => session.status === 'active').length
   const activeBrincaCount = brincaOpenSessions.filter((session) => session.status === 'active').length
@@ -301,6 +318,7 @@ function App(): ReactElement {
     setBrincaOpenSessions([])
     setBrincaRecentSessions([])
     setBrincaFinanceTotal(null)
+    setCombos([])
     setRecentSessions([])
     setFinanceByAtv([])
     setFinanceTotal(null)
@@ -323,6 +341,7 @@ function App(): ReactElement {
         nextBrincaSettings,
         nextBrincaOpenSessions,
         nextBrincaCompletedSessions,
+        nextCombos,
       ] =
         await Promise.all([
           fetchMyProfile(userId),
@@ -333,6 +352,7 @@ function App(): ReactElement {
           fetchBrincaSettings(),
           fetchOpenBrincaSessions(),
           fetchCompletedBrincaSessionsByRange(monthStartIso, monthEndIso),
+          fetchCombos(120),
         ])
 
       const { byAtv, total } = computeFinance(nextAtvs, completedSessions)
@@ -358,6 +378,7 @@ function App(): ReactElement {
       setBrincaOpenSessions(nextBrincaOpenSessions)
       setBrincaRecentSessions(nextBrincaCompletedSessions.slice(0, 80))
       setBrincaFinanceTotal(brincaTotal)
+      setCombos(nextCombos)
       setRecentSessions(completedSessions.slice(0, 60))
       setFinanceByAtv(byAtv)
       setFinanceTotal(total)
@@ -427,6 +448,9 @@ function App(): ReactElement {
         void loadData()
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'brinca_settings' }, () => {
+        void loadData()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'combos' }, () => {
         void loadData()
       })
       .subscribe()
@@ -754,6 +778,48 @@ function App(): ReactElement {
     [loadData, notify],
   )
 
+  const handleCreateCombo = useCallback(
+    async (input: {
+      childName: string
+      startMode: ComboStartMode
+      motoDurationMinutes: number
+      brincaDurationMinutes: number
+      atvId?: string | null
+    }) => {
+      await createCombo(input)
+      notify('success', 'Combo creado')
+      await loadData()
+    },
+    [loadData, notify],
+  )
+
+  const handleStartComboMotoLeg = useCallback(
+    async (comboId: string, atvId?: string | null) => {
+      await startComboMotoLeg(comboId, atvId)
+      notify('success', 'Sesion de moto iniciada para el combo')
+      await loadData()
+    },
+    [loadData, notify],
+  )
+
+  const handleStartComboBrincaLeg = useCallback(
+    async (comboId: string) => {
+      await startComboBrincaLeg(comboId)
+      notify('success', 'Sesion de Brinca iniciada para el combo')
+      await loadData()
+    },
+    [loadData, notify],
+  )
+
+  const handleCancelCombo = useCallback(
+    async (comboId: string) => {
+      await cancelCombo(comboId)
+      notify('success', 'Combo cancelado')
+      await loadData()
+    },
+    [loadData, notify],
+  )
+
   const handleResetFinance = useCallback(async () => {
     const deleted = await resetFinanceData()
     notify('success', `Finanzas reiniciadas. Sesiones eliminadas: ${deleted}`)
@@ -826,7 +892,9 @@ function App(): ReactElement {
         </article>
         <article className="summary-card">
           <span>Total del mes</span>
-          <strong>{formatCurrencyCop(financeTotal?.amount_total_cop ?? 0)}</strong>
+          <strong>
+            {formatCurrencyCop((financeTotal?.amount_total_cop ?? 0) + (brincaFinanceTotal?.amount_total_cop ?? 0))}
+          </strong>
         </article>
       </section>
 
@@ -836,6 +904,9 @@ function App(): ReactElement {
         </button>
         <button type="button" className={tab === 'brinca' ? 'active' : ''} onClick={() => setTab('brinca')}>
           Brinca
+        </button>
+        <button type="button" className={tab === 'combos' ? 'active' : ''} onClick={() => setTab('combos')}>
+          Combos
         </button>
         <button type="button" className={tab === 'atvs' ? 'active' : ''} onClick={() => setTab('atvs')}>
           Cuatrimotos
@@ -884,6 +955,23 @@ function App(): ReactElement {
           onUpdateRates={handleUpdateRates}
           onToggleActive={handleToggleActive}
           onDeleteAtv={handleDeleteAtv}
+          onError={(message) => notify('error', message)}
+        />
+      ) : null}
+
+      {tab === 'combos' ? (
+        <CombosTab
+          combos={combos}
+          atvs={atvs}
+          openSessionByAtv={openSessionByAtv}
+          openMotoSessionById={openMotoSessionById}
+          openBrincaSessionById={openBrincaSessionById}
+          brincaSettings={brincaSettings}
+          tickMs={tickMs}
+          onCreateCombo={handleCreateCombo}
+          onStartMotoLeg={handleStartComboMotoLeg}
+          onStartBrincaLeg={handleStartComboBrincaLeg}
+          onCancelCombo={handleCancelCombo}
           onError={(message) => notify('error', message)}
         />
       ) : null}
@@ -1237,7 +1325,7 @@ function BrincaTab(props: {
     setSavingSettings(true)
     try {
       const nextBaseMinutes = Math.max(1, Math.floor(baseMinutesDraft ?? settings?.base_minutes ?? 15))
-      const nextBasePrice = Math.max(1, Math.floor(basePriceDraft ?? settings?.base_price_cop ?? 5000))
+      const nextBasePrice = Math.max(5000, Math.floor(basePriceDraft ?? settings?.base_price_cop ?? 5000))
       await onUpdateSettings(nextBaseMinutes, nextBasePrice)
     } catch (error) {
       onError(getErrorMessage(error))
@@ -1369,7 +1457,7 @@ function BrincaTab(props: {
               Base precio (COP)
               <input
                 type="number"
-                min={1}
+                min={5000}
                 value={basePriceDraft ?? settings?.base_price_cop ?? 5000}
                 disabled={!canEdit}
                 onChange={(event) => setBasePriceDraft(Number(event.target.value))}
@@ -1489,6 +1577,354 @@ function BrincaTab(props: {
   )
 }
 
+function CombosTab(props: {
+  combos: Combo[]
+  atvs: Atv[]
+  openSessionByAtv: Map<string, RideSession>
+  openMotoSessionById: Map<string, RideSession>
+  openBrincaSessionById: Map<string, BrincaSession>
+  brincaSettings: BrincaSettings | null
+  tickMs: number
+  onCreateCombo: (input: {
+    childName: string
+    startMode: ComboStartMode
+    motoDurationMinutes: number
+    brincaDurationMinutes: number
+    atvId?: string | null
+  }) => Promise<void>
+  onStartMotoLeg: (comboId: string, atvId?: string | null) => Promise<void>
+  onStartBrincaLeg: (comboId: string) => Promise<void>
+  onCancelCombo: (comboId: string) => Promise<void>
+  onError: (message: string) => void
+}): ReactElement {
+  const {
+    combos,
+    atvs,
+    openSessionByAtv,
+    openMotoSessionById,
+    openBrincaSessionById,
+    brincaSettings,
+    tickMs,
+    onCreateCombo,
+    onStartMotoLeg,
+    onStartBrincaLeg,
+    onCancelCombo,
+    onError,
+  } = props
+
+  const [childName, setChildName] = useState('')
+  const [startMode, setStartMode] = useState<ComboStartMode>('either')
+  const [selectedAtvId, setSelectedAtvId] = useState('')
+  const [motoDurationMinutes, setMotoDurationMinutes] = useState(10)
+  const [brincaDurationMinutes, setBrincaDurationMinutes] = useState(15)
+  const [creating, setCreating] = useState(false)
+  const [busyComboId, setBusyComboId] = useState<string | null>(null)
+  const [atvDraftByCombo, setAtvDraftByCombo] = useState<Record<string, string>>({})
+
+  const availableAtvs = useMemo(() => {
+    return atvs.filter((atv) => atv.active && !openSessionByAtv.has(atv.id))
+  }, [atvs, openSessionByAtv])
+
+  const availableAtvIds = useMemo(() => new Set(availableAtvs.map((atv) => atv.id)), [availableAtvs])
+
+  function comboStatusBadge(status: Combo['status']): { label: string; className: string } {
+    if (status === 'completed') {
+      return { label: 'Completado', className: 'finished' }
+    }
+    if (status === 'cancelled') {
+      return { label: 'Cancelado', className: 'inactive' }
+    }
+    if (status === 'in_progress') {
+      return { label: 'En curso', className: 'busy' }
+    }
+    return { label: 'Pendiente', className: 'ok' }
+  }
+
+  function legStatusBadge(
+    hasSession: boolean,
+    completedAt: string | null,
+    openStatus: 'active' | 'paused' | null,
+  ): { label: string; className: string } {
+    if (!hasSession) {
+      return { label: 'Pendiente', className: 'ok' }
+    }
+    if (completedAt) {
+      return { label: 'Completada', className: 'finished' }
+    }
+    if (openStatus === 'paused') {
+      return { label: 'Pausada', className: 'paused' }
+    }
+    return { label: 'En uso', className: 'busy' }
+  }
+
+  function startModeLabel(mode: ComboStartMode): string {
+    if (mode === 'moto_first') {
+      return 'Moto primero'
+    }
+    if (mode === 'brinca_first') {
+      return 'Brinca primero'
+    }
+    return 'Cualquiera primero'
+  }
+
+  async function handleCreateCombo(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault()
+    const name = childName.trim()
+    if (!name) {
+      onError('Debes ingresar el nombre del nino.')
+      return
+    }
+
+    setCreating(true)
+    try {
+      await onCreateCombo({
+        childName: name,
+        startMode,
+        motoDurationMinutes: Math.max(1, Math.floor(motoDurationMinutes || 10)),
+        brincaDurationMinutes: Math.max(1, Math.floor(brincaDurationMinutes || brincaSettings?.base_minutes || 15)),
+        atvId: selectedAtvId || null,
+      })
+      setChildName('')
+    } catch (error) {
+      onError(getErrorMessage(error))
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  async function handleStartMoto(combo: Combo): Promise<void> {
+    const atvId = atvDraftByCombo[combo.id] ?? combo.atv_id ?? ''
+    if (!atvId) {
+      onError('Selecciona una cuatrimoto disponible para iniciar la parte de moto.')
+      return
+    }
+
+    setBusyComboId(combo.id)
+    try {
+      await onStartMotoLeg(combo.id, atvId)
+    } catch (error) {
+      onError(getErrorMessage(error))
+    } finally {
+      setBusyComboId(null)
+    }
+  }
+
+  async function handleStartBrinca(combo: Combo): Promise<void> {
+    setBusyComboId(combo.id)
+    try {
+      await onStartBrincaLeg(combo.id)
+    } catch (error) {
+      onError(getErrorMessage(error))
+    } finally {
+      setBusyComboId(null)
+    }
+  }
+
+  async function handleCancel(comboId: string): Promise<void> {
+    const confirmed = window.confirm('Seguro que deseas cancelar este combo?')
+    if (!confirmed) {
+      return
+    }
+
+    setBusyComboId(comboId)
+    try {
+      await onCancelCombo(comboId)
+    } catch (error) {
+      onError(getErrorMessage(error))
+    } finally {
+      setBusyComboId(null)
+    }
+  }
+
+  return (
+    <section className="panel">
+      <header className="panel-header">
+        <h2>Combos</h2>
+        <p className="muted">
+          Crea combos para un nino (Moto + Brinca), elige que inicia primero y dispara cada parte cuando toque.
+        </p>
+      </header>
+
+      <form className="inline-form combo-create-form" onSubmit={handleCreateCombo}>
+        <label>
+          Nombre del nino
+          <input
+            required
+            value={childName}
+            onChange={(event) => setChildName(event.target.value)}
+            placeholder="Ej: Mateo"
+          />
+        </label>
+        <label>
+          Orden del combo
+          <select value={startMode} onChange={(event) => setStartMode(event.target.value as ComboStartMode)}>
+            <option value="either">Cualquiera primero</option>
+            <option value="moto_first">Moto primero</option>
+            <option value="brinca_first">Brinca primero</option>
+          </select>
+        </label>
+        <label>
+          Moto (minutos)
+          <input
+            type="number"
+            min={1}
+            value={motoDurationMinutes}
+            onChange={(event) => setMotoDurationMinutes(Number(event.target.value))}
+          />
+        </label>
+        <label>
+          Brinca (minutos)
+          <input
+            type="number"
+            min={1}
+            value={brincaDurationMinutes}
+            onChange={(event) => setBrincaDurationMinutes(Number(event.target.value))}
+          />
+        </label>
+        <label>
+          Cuatrimoto (opcional)
+          <select value={selectedAtvId} onChange={(event) => setSelectedAtvId(event.target.value)}>
+            <option value="">Elegir al iniciar moto</option>
+            {availableAtvs.map((atv) => (
+              <option key={atv.id} value={atv.id}>
+                {atv.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button type="submit" disabled={creating}>
+          {creating ? 'Creando...' : 'Crear combo'}
+        </button>
+      </form>
+
+      <div className="card-grid">
+        {combos.length === 0 ? (
+          <article className="atv-card">
+            <p className="meta">Todavia no hay combos creados.</p>
+          </article>
+        ) : (
+          combos.map((combo) => {
+            const statusBadge = comboStatusBadge(combo.status)
+            const motoOpen = combo.moto_session_id ? openMotoSessionById.get(combo.moto_session_id) : undefined
+            const brincaOpen = combo.brinca_session_id ? openBrincaSessionById.get(combo.brinca_session_id) : undefined
+            const motoOpenStatus = motoOpen ? (motoOpen.status === 'paused' ? 'paused' : 'active') : null
+            const brincaOpenStatus = brincaOpen ? (brincaOpen.status === 'paused' ? 'paused' : 'active') : null
+            const motoBadge = legStatusBadge(Boolean(combo.moto_session_id), combo.moto_completed_at, motoOpenStatus)
+            const brincaBadge = legStatusBadge(Boolean(combo.brinca_session_id), combo.brinca_completed_at, brincaOpenStatus)
+            const motoRemaining = motoOpen ? getRemainingMs(motoOpen.target_end_at, tickMs) : null
+            const brincaRemaining = brincaOpen ? getRemainingMs(brincaOpen.target_end_at, tickMs) : null
+            const comboAtvValue = atvDraftByCombo[combo.id] ?? combo.atv_id ?? ''
+
+            return (
+              <article key={combo.id} className="atv-card combo-card">
+                <header>
+                  <h3>{combo.child_name}</h3>
+                  <span className={`badge ${statusBadge.className}`}>{statusBadge.label}</span>
+                </header>
+
+                <p className="meta">Orden: {startModeLabel(combo.start_mode)}</p>
+                <p className="meta">Creado: {formatDateTime(combo.created_at)}</p>
+                <p className="meta">
+                  Moto asignada:{' '}
+                  {combo.atv_id ? atvs.find((atv) => atv.id === combo.atv_id)?.name ?? 'Moto no encontrada' : 'Sin seleccionar'}
+                </p>
+
+                <section className="combo-leg">
+                  <div className="combo-leg-row">
+                    <strong>Moto</strong>
+                    <span className={`badge ${motoBadge.className}`}>{motoBadge.label}</span>
+                  </div>
+                  <p className="meta">Duracion: {formatMinutes(combo.moto_duration_minutes)}</p>
+                  {combo.moto_completed_at ? (
+                    <p className="meta">
+                      Cerrada: {formatTimeAgo(combo.moto_completed_at, tickMs)} ({formatDateTime(combo.moto_completed_at)})
+                    </p>
+                  ) : null}
+                  {motoRemaining !== null ? (
+                    <p className={`clock ${motoRemaining <= 0 ? 'danger-text' : ''}`}>Tiempo restante: {formatRemainingClock(motoRemaining)}</p>
+                  ) : null}
+
+                  {!combo.moto_session_id && combo.status !== 'cancelled' ? (
+                    <div className="button-row">
+                      <label className="combo-atv-select">
+                        Cuatrimoto
+                        <select
+                          value={comboAtvValue}
+                          onChange={(event) =>
+                            setAtvDraftByCombo((current) => ({
+                              ...current,
+                              [combo.id]: event.target.value,
+                            }))
+                          }
+                        >
+                          <option value="">Seleccionar</option>
+                          {atvs
+                            .filter((atv) => atv.active)
+                            .map((atv) => {
+                              const isBusy = openSessionByAtv.has(atv.id)
+                              const isSelected = comboAtvValue === atv.id
+                              return (
+                                <option key={atv.id} value={atv.id} disabled={isBusy && !isSelected}>
+                                  {atv.name}
+                                  {isBusy && !isSelected ? ' (ocupada)' : ''}
+                                </option>
+                              )
+                            })}
+                        </select>
+                      </label>
+                      <button
+                        type="button"
+                        disabled={busyComboId === combo.id || !comboAtvValue || !availableAtvIds.has(comboAtvValue)}
+                        onClick={() => void handleStartMoto(combo)}
+                      >
+                        Iniciar moto
+                      </button>
+                    </div>
+                  ) : null}
+                </section>
+
+                <section className="combo-leg">
+                  <div className="combo-leg-row">
+                    <strong>Brinca</strong>
+                    <span className={`badge ${brincaBadge.className}`}>{brincaBadge.label}</span>
+                  </div>
+                  <p className="meta">Duracion: {formatMinutes(combo.brinca_duration_minutes)}</p>
+                  {combo.brinca_completed_at ? (
+                    <p className="meta">
+                      Cerrada: {formatTimeAgo(combo.brinca_completed_at, tickMs)} ({formatDateTime(combo.brinca_completed_at)})
+                    </p>
+                  ) : null}
+                  {brincaRemaining !== null ? (
+                    <p className={`clock ${brincaRemaining <= 0 ? 'danger-text' : ''}`}>
+                      Tiempo restante: {formatRemainingClock(brincaRemaining)}
+                    </p>
+                  ) : null}
+
+                  {!combo.brinca_session_id && combo.status !== 'cancelled' ? (
+                    <button
+                      type="button"
+                      disabled={busyComboId === combo.id}
+                      onClick={() => void handleStartBrinca(combo)}
+                    >
+                      Iniciar Brinca
+                    </button>
+                  ) : null}
+                </section>
+
+                {combo.status !== 'cancelled' && combo.status !== 'completed' ? (
+                  <button type="button" className="danger" disabled={busyComboId === combo.id} onClick={() => void handleCancel(combo.id)}>
+                    Cancelar combo
+                  </button>
+                ) : null}
+              </article>
+            )
+          })
+        )}
+      </div>
+    </section>
+  )
+}
+
 function AtvAdminTab(props: {
   atvs: Atv[]
   canEdit: boolean
@@ -1518,6 +1954,11 @@ function AtvAdminTab(props: {
       return
     }
 
+    if (basePriceCop < 10000) {
+      onError('La tarifa base de una moto no puede ser menor a 10000 COP.')
+      return
+    }
+
     setSaving(true)
     try {
       await onAddAtv({
@@ -1525,7 +1966,7 @@ function AtvAdminTab(props: {
         plate,
         colorHex,
         baseMinutes,
-        basePriceCop,
+        basePriceCop: Math.max(10000, Math.floor(basePriceCop)),
       })
       setName('')
       setPlate('')
@@ -1559,7 +2000,7 @@ function AtvAdminTab(props: {
     try {
       await onUpdateRates(atvId, {
         baseMinutes: Math.max(1, Math.floor(draft.baseMinutes)),
-        basePriceCop: Math.max(1, Math.floor(draft.basePriceCop)),
+        basePriceCop: Math.max(10000, Math.floor(draft.basePriceCop)),
         colorHex: draft.colorHex,
       })
     } catch (error) {
@@ -1639,7 +2080,7 @@ function AtvAdminTab(props: {
           <input
             required
             type="number"
-            min={1}
+            min={10000}
             value={basePriceCop}
             onChange={(event) => setBasePriceCop(Number(event.target.value))}
           />
@@ -1710,7 +2151,7 @@ function AtvAdminTab(props: {
                   <td>
                     <input
                       type="number"
-                      min={1}
+                      min={10000}
                       value={draft?.basePriceCop ?? atv.base_price_cop}
                       disabled={!canEdit}
                       onChange={(event) => {
@@ -1789,6 +2230,9 @@ function FinanceTab(props: {
     onResetFinance,
     onError,
   } = props
+  const globalSessionCount = (total?.session_count ?? 0) + (brincaTotal?.session_count ?? 0)
+  const globalMinutes = (total?.minutes_total ?? 0) + (brincaTotal?.minutes_total ?? 0)
+  const globalAmountCop = (total?.amount_total_cop ?? 0) + (brincaTotal?.amount_total_cop ?? 0)
 
   function getAtvName(atvId: string): string {
     return atvs.find((item) => item.id === atvId)?.name ?? atvId
@@ -1818,7 +2262,7 @@ function FinanceTab(props: {
     <section className="panel">
       <header className="panel-header">
         <h2>Resumen financiero por mes</h2>
-        <p className="muted">Consolidado por moto y total global de {monthLabel}.</p>
+        <p className="muted">Consolidado de motos + Brinca y total global de {monthLabel}.</p>
         <div className="finance-controls">
           <label>
             Mes
@@ -1868,6 +2312,21 @@ function FinanceTab(props: {
         <article className="summary-card">
           <span>Total brinca</span>
           <strong>{formatCurrencyCop(brincaTotal?.amount_total_cop ?? 0)}</strong>
+        </article>
+      </section>
+
+      <section className="summary-grid finance">
+        <article className="summary-card">
+          <span>Sesiones global</span>
+          <strong>{globalSessionCount}</strong>
+        </article>
+        <article className="summary-card">
+          <span>Minutos global</span>
+          <strong>{globalMinutes}</strong>
+        </article>
+        <article className="summary-card">
+          <span>Total global</span>
+          <strong>{formatCurrencyCop(globalAmountCop)}</strong>
         </article>
       </section>
 

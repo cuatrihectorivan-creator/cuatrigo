@@ -22,6 +22,8 @@ Aplica en orden:
 5. `supabase/migrations/0004_expiry_precision_soft_delete_and_colors.sql`
 6. `supabase/migrations/0005_brinca_sessions.sql`
 7. `supabase/migrations/0006_closed_block_pricing.sql`
+8. `supabase/migrations/0007_combos.sql`
+9. `supabase/migrations/0008_minimum_price_floors.sql`
 
 Puedes hacerlo desde SQL Editor o con Supabase CLI.
 

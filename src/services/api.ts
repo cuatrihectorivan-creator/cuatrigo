@@ -3,6 +3,7 @@ import type {
   Atv,
   BrincaSession,
   BrincaSettings,
+  Combo,
   FinanceByAtvRow,
   FinanceTotalRow,
   Profile,
@@ -16,6 +17,8 @@ const sessionColumns =
 const brincaSettingsColumns = 'id,base_minutes,base_price_cop,created_at,updated_at'
 const brincaSessionColumns =
   'id,child_name,started_by,started_at,target_end_at,paused_at,ended_at,status,base_minutes,base_price_cop,minutes_billed,amount_cop,created_at,updated_at'
+const comboColumns =
+  'id,child_name,start_mode,status,atv_id,moto_duration_minutes,brinca_duration_minutes,moto_session_id,brinca_session_id,moto_completed_at,brinca_completed_at,completed_at,started_by,created_at,updated_at'
 
 export async function fetchMyProfile(userId: string): Promise<Profile | null> {
   const { data, error } = await supabase
@@ -402,6 +405,79 @@ export async function refreshExpiredBrincaSessions(): Promise<number> {
   }
 
   return Number(data ?? 0)
+}
+
+export async function fetchCombos(limit = 80): Promise<Combo[]> {
+  const { data, error } = await supabase
+    .from('combos')
+    .select(comboColumns)
+    .order('created_at', { ascending: false })
+    .limit(limit)
+
+  if (error) {
+    throw error
+  }
+
+  return (data ?? []) as Combo[]
+}
+
+export async function createCombo(input: {
+  childName: string
+  startMode: 'moto_first' | 'brinca_first' | 'either'
+  motoDurationMinutes: number
+  brincaDurationMinutes: number
+  atvId?: string | null
+}): Promise<string> {
+  const { data, error } = await supabase.rpc('create_combo', {
+    p_child_name: input.childName,
+    p_start_mode: input.startMode,
+    p_moto_duration_minutes: input.motoDurationMinutes,
+    p_brinca_duration_minutes: input.brincaDurationMinutes,
+    p_atv_id: input.atvId ?? null,
+  })
+
+  if (error) {
+    throw error
+  }
+
+  return String(data)
+}
+
+export async function startComboMotoLeg(comboId: string, atvId?: string | null): Promise<string> {
+  const { data, error } = await supabase.rpc('start_combo_moto_leg', {
+    p_combo_id: comboId,
+    p_atv_id: atvId ?? null,
+  })
+
+  if (error) {
+    throw error
+  }
+
+  return String(data)
+}
+
+export async function startComboBrincaLeg(comboId: string): Promise<string> {
+  const { data, error } = await supabase.rpc('start_combo_brinca_leg', {
+    p_combo_id: comboId,
+  })
+
+  if (error) {
+    throw error
+  }
+
+  return String(data)
+}
+
+export async function cancelCombo(comboId: string): Promise<string> {
+  const { data, error } = await supabase.rpc('cancel_combo', {
+    p_combo_id: comboId,
+  })
+
+  if (error) {
+    throw error
+  }
+
+  return String(data)
 }
 
 export function computeBrincaFinance(completedSessions: BrincaSession[]): FinanceTotalRow {

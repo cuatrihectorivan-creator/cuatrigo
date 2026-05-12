@@ -79,7 +79,8 @@ p {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -134,7 +135,22 @@ input {
   outline: none;
 }
 
+select {
+  width: 100%;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.62rem 0.7rem;
+  background: rgba(8, 14, 36, 0.72);
+  outline: none;
+}
+
 input:focus {
+  border-color: rgba(116, 188, 255, 0.85);
+  box-shadow: 0 0 0 3px rgba(53, 161, 255, 0.18);
+}
+
+select:focus {
   border-color: rgba(116, 188, 255, 0.85);
   box-shadow: 0 0 0 3px rgba(53, 161, 255, 0.18);
 }
@@ -362,6 +378,10 @@ thead th {
   grid-template-columns: minmax(180px, 1.2fr) minmax(150px, 0.7fr) minmax(160px, 0.8fr);
 }
 
+.combo-create-form {
+  grid-template-columns: repeat(6, minmax(130px, 1fr));
+}
+
 .panel {
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);
@@ -406,6 +426,30 @@ thead th {
 
 .atv-card:hover {
   border-color: rgba(145, 193, 255, 0.52);
+}
+
+.combo-card {
+  gap: 0.72rem;
+}
+
+.combo-leg {
+  border: 1px solid rgba(102, 147, 235, 0.26);
+  border-radius: 10px;
+  padding: 0.65rem;
+  display: grid;
+  gap: 0.4rem;
+  background: rgba(10, 19, 49, 0.48);
+}
+
+.combo-leg-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.combo-atv-select {
+  min-width: 180px;
 }
 
 .atv-image-wrap {
@@ -660,6 +704,10 @@ thead th {
   }
 
   .brinca-start-form {
+    grid-template-columns: 1fr;
+  }
+
+  .combo-create-form {
     grid-template-columns: 1fr;
   }
 
