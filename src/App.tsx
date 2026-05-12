@@ -29,6 +29,7 @@ import {
   formatTimeAgo,
   getRemainingMs,
 } from './lib/format'
+import { downloadFinanceCsv } from './lib/exportFinanceCsv'
 import { supabase } from './lib/supabase'
 import type { Atv, FinanceByAtvRow, FinanceTotalRow, Profile, RideSession } from './types/domain'
 
@@ -259,6 +260,7 @@ function App(): ReactElement {
     () => monthRangeFromKey(selectedMonth),
     [selectedMonth],
   )
+  const selectedMonthLabel = useMemo(() => monthLabelFromKey(selectedMonth), [selectedMonth])
 
   const notify = useCallback((type: ToastType, message: string) => {
     setToast({ type, message })
@@ -588,6 +590,18 @@ function App(): ReactElement {
     await loadData()
   }, [loadData, notify])
 
+  const handleExportFinanceCsv = useCallback(() => {
+    downloadFinanceCsv({
+      monthKey: selectedMonth,
+      monthLabel: selectedMonthLabel,
+      byAtv: financeByAtv,
+      total: financeTotal,
+      recentSessions,
+      atvs,
+    })
+    notify('success', `Reporte CSV descargado (${selectedMonthLabel}).`)
+  }, [atvs, financeByAtv, financeTotal, notify, recentSessions, selectedMonth, selectedMonthLabel])
+
   if (!authReady) {
     return (
       <main className="splash">
@@ -687,8 +701,9 @@ function App(): ReactElement {
           atvs={atvs}
           canReset={isAdmin}
           monthKey={selectedMonth}
-          monthLabel={monthLabelFromKey(selectedMonth)}
+          monthLabel={selectedMonthLabel}
           onMonthChange={setSelectedMonth}
+          onExportCsv={handleExportFinanceCsv}
           onResetFinance={handleResetFinance}
           onError={(message) => notify('error', message)}
         />
@@ -1259,10 +1274,12 @@ function FinanceTab(props: {
   monthKey: string
   monthLabel: string
   onMonthChange: (value: string) => void
+  onExportCsv: () => void
   onResetFinance: () => Promise<void>
   onError: (message: string) => void
 }): ReactElement {
-  const { byAtv, total, recentSessions, atvs, canReset, monthKey, monthLabel, onMonthChange, onResetFinance, onError } = props
+  const { byAtv, total, recentSessions, atvs, canReset, monthKey, monthLabel, onMonthChange, onExportCsv, onResetFinance, onError } =
+    props
 
   function getAtvName(atvId: string): string {
     return atvs.find((item) => item.id === atvId)?.name ?? atvId
@@ -1306,6 +1323,9 @@ function FinanceTab(props: {
               }}
             />
           </label>
+          <button type="button" className="secondary" onClick={onExportCsv}>
+            Descargar CSV
+          </button>
           <button type="button" className="danger" disabled={!canReset} onClick={() => void handleResetFinance()}>
             Reiniciar finanzas
           </button>
