@@ -102,6 +102,7 @@ function monthLabelFromKey(monthKey: string): string {
 type Tab = 'operations' | 'brinca' | 'combos' | 'atvs' | 'finance'
 type ToastType = 'error' | 'success'
 const RECENT_FINISH_SIGNAL_MS = 15 * 60 * 1000
+const COMBO_HISTORY_VISIBILITY_MS = 5 * 60 * 1000
 
 interface ToastState {
   type: ToastType
@@ -140,9 +141,52 @@ async function maybeNotifyExpiry(message: string): Promise<void> {
 
 let expiryAudioContext: AudioContext | null = null
 
-async function playExpirySound(): Promise<void> {
+function getAudioContextCtor(): typeof AudioContext | undefined {
   const webkitWindow = window as Window & { webkitAudioContext?: typeof AudioContext }
-  const AudioContextCtor = window.AudioContext ?? webkitWindow.webkitAudioContext
+  return window.AudioContext ?? webkitWindow.webkitAudioContext
+}
+
+async function armExpirySound(): Promise<boolean> {
+  const AudioContextCtor = getAudioContextCtor()
+  if (!AudioContextCtor) {
+    return false
+  }
+
+  if (!expiryAudioContext) {
+    expiryAudioContext = new AudioContextCtor()
+  }
+
+  const context = expiryAudioContext
+  if (context.state === 'suspended') {
+    await context.resume()
+  }
+
+  // Pulso silencioso para terminar de desbloquear audio en navegadores moviles.
+  const oscillator = context.createOscillator()
+  const gain = context.createGain()
+  gain.gain.setValueAtTime(0.0001, context.currentTime)
+  oscillator.connect(gain)
+  gain.connect(context.destination)
+  oscillator.start(context.currentTime)
+  oscillator.stop(context.currentTime + 0.03)
+
+  return context.state === 'running'
+}
+
+function triggerExpiryVibration(): boolean {
+  if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') {
+    return false
+  }
+
+  try {
+    return navigator.vibrate([220, 110, 220, 110, 420])
+  } catch {
+    return false
+  }
+}
+
+async function playExpirySound(): Promise<void> {
+  const AudioContextCtor = getAudioContextCtor()
   if (!AudioContextCtor) {
     return
   }
@@ -265,6 +309,8 @@ function App(): ReactElement {
   const [authPending, setAuthPending] = useState(false)
   const [authError, setAuthError] = useState<string | null>(null)
   const [toast, setToast] = useState<ToastState | null>(null)
+  const [soundArmed, setSoundArmed] = useState(false)
+  const [soundActivating, setSoundActivating] = useState(false)
 
   const [atvs, setAtvs] = useState<Atv[]>([])
   const [openSessions, setOpenSessions] = useState<RideSession[]>([])
@@ -285,6 +331,7 @@ function App(): ReactElement {
   const notifiedBrincaExpiryRef = useRef<Set<string>>(new Set())
   const autoClosingRef = useRef<Set<string>>(new Set())
   const autoClosingBrincaRef = useRef<Set<string>>(new Set())
+  const warnedSoundRef = useRef(false)
 
   const userId = user?.id ?? null
   const isAdmin = profile?.role === 'admin'
@@ -327,10 +374,39 @@ function App(): ReactElement {
     [selectedMonth],
   )
   const selectedMonthLabel = useMemo(() => monthLabelFromKey(selectedMonth), [selectedMonth])
+  const vibrationSupported = typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function'
 
   const notify = useCallback((type: ToastType, message: string) => {
     setToast({ type, message })
   }, [])
+
+  const triggerAlarmFeedback = useCallback(() => {
+    const vibrated = triggerExpiryVibration()
+
+    if (!soundArmed) {
+      if (!warnedSoundRef.current) {
+        warnedSoundRef.current = true
+        window.setTimeout(() => {
+          notify(
+            'error',
+            vibrated
+              ? 'Sonido no activado. Pulsa "Activar sonido" para alerta completa.'
+              : 'Sonido no activado y vibracion no disponible. Pulsa "Activar sonido".',
+          )
+        }, 0)
+      }
+      return
+    }
+
+    void playExpirySound().catch(() => {
+      if (!warnedSoundRef.current) {
+        warnedSoundRef.current = true
+        window.setTimeout(() => {
+          notify('error', 'No se pudo reproducir el sonido de alerta en este navegador.')
+        }, 0)
+      }
+    })
+  }, [notify, soundArmed])
 
   const clearDashboardState = useCallback(() => {
     setProfile(null)
@@ -517,13 +593,9 @@ function App(): ReactElement {
       window.setTimeout(() => {
         notify('error', label)
       }, 0)
-      void playExpirySound().catch(() => {
-        window.setTimeout(() => {
-          notify('error', 'No se pudo reproducir el sonido de alerta en este navegador.')
-        }, 0)
-      })
+      triggerAlarmFeedback()
     }
-  }, [openSessions, atvs, tickMs, notify])
+  }, [openSessions, atvs, tickMs, notify, triggerAlarmFeedback])
 
   useEffect(() => {
     const justExpiredKids: string[] = []
@@ -550,13 +622,9 @@ function App(): ReactElement {
       window.setTimeout(() => {
         notify('error', label)
       }, 0)
-      void playExpirySound().catch(() => {
-        window.setTimeout(() => {
-          notify('error', 'No se pudo reproducir el sonido de alerta en este navegador.')
-        }, 0)
-      })
+      triggerAlarmFeedback()
     }
-  }, [brincaOpenSessions, tickMs, notify])
+  }, [brincaOpenSessions, tickMs, notify, triggerAlarmFeedback])
 
   useEffect(() => {
     const sessionsToClose = openSessions.filter(
@@ -659,6 +727,30 @@ function App(): ReactElement {
 
     notify('success', 'Sesion finalizada')
   }, [notify])
+
+  const handleActivateSound = useCallback(async () => {
+    setSoundActivating(true)
+    try {
+      const ready = await armExpirySound()
+      if (!ready) {
+        notify('error', 'No se pudo activar el sonido en este navegador.')
+        return
+      }
+
+      setSoundArmed(true)
+      warnedSoundRef.current = false
+      notify(
+        'success',
+        vibrationSupported
+          ? 'Sonido activado. Vibracion lista como respaldo.'
+          : 'Sonido activado. Vibracion no disponible en este dispositivo.',
+      )
+    } catch {
+      notify('error', 'No se pudo activar el sonido en este navegador.')
+    } finally {
+      setSoundActivating(false)
+    }
+  }, [notify, vibrationSupported])
 
   const handleAddAtv = useCallback(
     async (input: { name: string; colorHex?: string; baseMinutes: number; basePriceCop: number }) => {
@@ -902,6 +994,14 @@ function App(): ReactElement {
         </div>
 
         <div className="topbar-actions">
+          <button
+            type="button"
+            className={`secondary ${soundArmed ? 'is-armed' : ''}`}
+            onClick={() => void handleActivateSound()}
+            disabled={soundActivating}
+          >
+            {soundActivating ? 'Activando sonido...' : soundArmed ? 'Sonido activado' : 'Activar sonido'}
+          </button>
           <button type="button" className="secondary" onClick={() => void loadData()} disabled={loading}>
             {loading ? 'Actualizando...' : 'Actualizar'}
           </button>
@@ -1674,6 +1774,21 @@ function CombosTab(props: {
   }, [atvs, openSessionByAtv])
 
   const availableAtvIds = useMemo(() => new Set(availableAtvs.map((atv) => atv.id)), [availableAtvs])
+  const visibleCombos = useMemo(() => {
+    return combos.filter((combo) => {
+      if (combo.status !== 'completed' && combo.status !== 'cancelled') {
+        return true
+      }
+
+      const referenceAt = combo.completed_at ?? combo.updated_at
+      const referenceMs = new Date(referenceAt).getTime()
+      if (!Number.isFinite(referenceMs)) {
+        return false
+      }
+
+      return tickMs - referenceMs <= COMBO_HISTORY_VISIBILITY_MS
+    })
+  }, [combos, tickMs])
 
   function comboStatusBadge(status: Combo['status']): { label: string; className: string } {
     if (status === 'completed') {
@@ -1792,6 +1907,7 @@ function CombosTab(props: {
           Crea combos para un nino (Moto + Brinca), elige que inicia primero y dispara cada parte cuando toque.
         </p>
         <p className="muted">Tarifa combo: Moto 10 min = 8000 COP, Brinca 15 min = 5000 COP.</p>
+        <p className="muted">Los combos completados o cancelados se ocultan automaticamente despues de 5 minutos.</p>
       </header>
 
       <form className="inline-form combo-create-form" onSubmit={handleCreateCombo}>
@@ -1847,12 +1963,12 @@ function CombosTab(props: {
       </form>
 
       <div className="card-grid">
-        {combos.length === 0 ? (
+        {visibleCombos.length === 0 ? (
           <article className="atv-card">
             <p className="meta">Todavia no hay combos creados.</p>
           </article>
         ) : (
-          combos.map((combo) => {
+          visibleCombos.map((combo) => {
             const statusBadge = comboStatusBadge(combo.status)
             const motoOpen = combo.moto_session_id ? openMotoSessionById.get(combo.moto_session_id) : undefined
             const brincaOpen = combo.brinca_session_id ? openBrincaSessionById.get(combo.brinca_session_id) : undefined

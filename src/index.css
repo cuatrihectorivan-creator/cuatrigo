@@ -119,6 +119,12 @@ button.secondary {
   box-shadow: none;
 }
 
+button.secondary.is-armed {
+  color: #dfffee;
+  background: linear-gradient(140deg, rgba(25, 96, 82, 0.92), rgba(22, 78, 73, 0.92));
+  border-color: rgba(115, 244, 206, 0.55);
+}
+
 button.danger {
   background: linear-gradient(120deg, #d74771, #f26380);
   border-color: rgba(255, 131, 168, 0.45);
