@@ -4,6 +4,7 @@ import type {
   BrincaSession,
   BrincaSettings,
   Combo,
+  ComboFinanceSummary,
   FinanceByAtvRow,
   FinanceTotalRow,
   Profile,
@@ -495,5 +496,62 @@ export function computeBrincaFinance(completedSessions: BrincaSession[]): Financ
     session_count: totalSessions,
     minutes_total: totalMinutes,
     amount_total_cop: totalAmount,
+  }
+}
+
+export function computeComboFinance(
+  combos: Combo[],
+  completedMotoSessions: RideSession[],
+  completedBrincaSessions: BrincaSession[],
+): ComboFinanceSummary {
+  const comboIdByMotoSession = new Map<string, string>()
+  const comboIdByBrincaSession = new Map<string, string>()
+
+  for (const combo of combos) {
+    if (combo.status === 'cancelled') {
+      continue
+    }
+    if (combo.moto_session_id) {
+      comboIdByMotoSession.set(combo.moto_session_id, combo.id)
+    }
+    if (combo.brinca_session_id) {
+      comboIdByBrincaSession.set(combo.brinca_session_id, combo.id)
+    }
+  }
+
+  const comboIds = new Set<string>()
+  let sessionCount = 0
+  let minutesTotal = 0
+  let amountTotal = 0
+
+  for (const session of completedMotoSessions) {
+    const comboId = comboIdByMotoSession.get(session.id)
+    if (!comboId) {
+      continue
+    }
+
+    comboIds.add(comboId)
+    sessionCount += 1
+    minutesTotal += session.minutes_billed ?? 0
+    amountTotal += session.amount_cop ?? 0
+  }
+
+  for (const session of completedBrincaSessions) {
+    const comboId = comboIdByBrincaSession.get(session.id)
+    if (!comboId) {
+      continue
+    }
+
+    comboIds.add(comboId)
+    sessionCount += 1
+    minutesTotal += session.minutes_billed ?? 0
+    amountTotal += session.amount_cop ?? 0
+  }
+
+  return {
+    combo_count: comboIds.size,
+    session_count: sessionCount,
+    minutes_total: minutesTotal,
+    amount_total_cop: amountTotal,
   }
 }

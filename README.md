@@ -50,6 +50,7 @@ Revisa:
 - `supabase/migrations/0006_closed_block_pricing.sql`
 - `supabase/migrations/0007_combos.sql`
 - `supabase/migrations/0008_minimum_price_floors.sql`
+- `supabase/migrations/0009_combo_discount_and_finance.sql`
 - `supabase/README.md`
 
 ## Deploy en Cloudflare Pages

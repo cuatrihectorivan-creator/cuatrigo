@@ -24,6 +24,7 @@ Aplica en orden:
 7. `supabase/migrations/0006_closed_block_pricing.sql`
 8. `supabase/migrations/0007_combos.sql`
 9. `supabase/migrations/0008_minimum_price_floors.sql`
+10. `supabase/migrations/0009_combo_discount_and_finance.sql`
 
 Puedes hacerlo desde SQL Editor o con Supabase CLI.
 

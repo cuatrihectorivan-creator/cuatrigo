@@ -52,6 +52,13 @@ export interface FinanceTotalRow {
   amount_total_cop: number
 }
 
+export interface ComboFinanceSummary {
+  combo_count: number
+  session_count: number
+  minutes_total: number
+  amount_total_cop: number
+}
+
 export interface BrincaSettings {
   id: boolean
   base_minutes: number

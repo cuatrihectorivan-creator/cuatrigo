@@ -1,4 +1,11 @@
-import type { Atv, BrincaSession, FinanceByAtvRow, FinanceTotalRow, RideSession } from '../types/domain'
+import type {
+  Atv,
+  BrincaSession,
+  ComboFinanceSummary,
+  FinanceByAtvRow,
+  FinanceTotalRow,
+  RideSession,
+} from '../types/domain'
 
 interface ExportFinanceCsvInput {
   monthKey: string
@@ -8,6 +15,7 @@ interface ExportFinanceCsvInput {
   recentSessions: RideSession[]
   brincaTotal: FinanceTotalRow | null
   brincaRecentSessions: BrincaSession[]
+  comboFinance: ComboFinanceSummary | null
   atvs: Atv[]
 }
 
@@ -37,7 +45,7 @@ function formatDateTime(value: string | null): string {
 }
 
 export function downloadFinanceCsv(input: ExportFinanceCsvInput): void {
-  const { monthKey, monthLabel, byAtv, total, recentSessions, brincaTotal, brincaRecentSessions, atvs } = input
+  const { monthKey, monthLabel, byAtv, total, recentSessions, brincaTotal, brincaRecentSessions, comboFinance, atvs } = input
   const atvNameById = new Map(atvs.map((atv) => [atv.id, atv.name]))
   const generatedAt = new Intl.DateTimeFormat('es-CO', {
     dateStyle: 'short',
@@ -70,6 +78,11 @@ export function downloadFinanceCsv(input: ExportFinanceCsvInput): void {
   rows.push(['Resumen Brinca Brinca'])
   rows.push(['Sesiones', 'Minutos cobrados', 'Total COP'])
   rows.push([brincaTotal?.session_count ?? 0, brincaTotal?.minutes_total ?? 0, brincaTotal?.amount_total_cop ?? 0])
+
+  rows.push([])
+  rows.push(['Resumen Combos'])
+  rows.push(['Combos cobrados', 'Sesiones de combo', 'Total COP'])
+  rows.push([comboFinance?.combo_count ?? 0, comboFinance?.session_count ?? 0, comboFinance?.amount_total_cop ?? 0])
 
   rows.push([])
   rows.push(['Sesiones cerradas del mes'])

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { User } from '@supabase/supabase-js'
 import {
   cancelCombo,
+  computeComboFinance,
   computeBrincaFinance,
   computeFinance,
   createCombo,
@@ -52,6 +53,7 @@ import type {
   BrincaSession,
   BrincaSettings,
   Combo,
+  ComboFinanceSummary,
   ComboStartMode,
   FinanceByAtvRow,
   FinanceTotalRow,
@@ -271,6 +273,7 @@ function App(): ReactElement {
   const [brincaOpenSessions, setBrincaOpenSessions] = useState<BrincaSession[]>([])
   const [brincaRecentSessions, setBrincaRecentSessions] = useState<BrincaSession[]>([])
   const [brincaFinanceTotal, setBrincaFinanceTotal] = useState<FinanceTotalRow | null>(null)
+  const [comboFinanceTotal, setComboFinanceTotal] = useState<ComboFinanceSummary | null>(null)
   const [combos, setCombos] = useState<Combo[]>([])
   const [recentSessions, setRecentSessions] = useState<RideSession[]>([])
   const [financeByAtv, setFinanceByAtv] = useState<FinanceByAtvRow[]>([])
@@ -318,6 +321,7 @@ function App(): ReactElement {
     setBrincaOpenSessions([])
     setBrincaRecentSessions([])
     setBrincaFinanceTotal(null)
+    setComboFinanceTotal(null)
     setCombos([])
     setRecentSessions([])
     setFinanceByAtv([])
@@ -352,11 +356,12 @@ function App(): ReactElement {
           fetchBrincaSettings(),
           fetchOpenBrincaSessions(),
           fetchCompletedBrincaSessionsByRange(monthStartIso, monthEndIso),
-          fetchCombos(120),
+          fetchCombos(500),
         ])
 
       const { byAtv, total } = computeFinance(nextAtvs, completedSessions)
       const brincaTotal = computeBrincaFinance(nextBrincaCompletedSessions)
+      const comboTotal = computeComboFinance(nextCombos, completedSessions, nextBrincaCompletedSessions)
       const nextLastClosedByAtv: Record<string, RideSession> = {}
       for (const session of closedSessionsRecent) {
         if (session.status !== 'completed') {
@@ -378,6 +383,7 @@ function App(): ReactElement {
       setBrincaOpenSessions(nextBrincaOpenSessions)
       setBrincaRecentSessions(nextBrincaCompletedSessions.slice(0, 80))
       setBrincaFinanceTotal(brincaTotal)
+      setComboFinanceTotal(comboTotal)
       setCombos(nextCombos)
       setRecentSessions(completedSessions.slice(0, 60))
       setFinanceByAtv(byAtv)
@@ -835,10 +841,22 @@ function App(): ReactElement {
       recentSessions,
       brincaTotal: brincaFinanceTotal,
       brincaRecentSessions,
+      comboFinance: comboFinanceTotal,
       atvs,
     })
     notify('success', `Reporte CSV descargado (${selectedMonthLabel}).`)
-  }, [atvs, brincaFinanceTotal, brincaRecentSessions, financeByAtv, financeTotal, notify, recentSessions, selectedMonth, selectedMonthLabel])
+  }, [
+    atvs,
+    brincaFinanceTotal,
+    brincaRecentSessions,
+    comboFinanceTotal,
+    financeByAtv,
+    financeTotal,
+    notify,
+    recentSessions,
+    selectedMonth,
+    selectedMonthLabel,
+  ])
 
   if (!authReady) {
     return (
@@ -983,6 +1001,7 @@ function App(): ReactElement {
           recentSessions={recentSessions}
           brincaTotal={brincaFinanceTotal}
           brincaRecentSessions={brincaRecentSessions}
+          comboFinance={comboFinanceTotal}
           atvs={atvs}
           canReset={isAdmin}
           monthKey={selectedMonth}
@@ -1743,6 +1762,7 @@ function CombosTab(props: {
         <p className="muted">
           Crea combos para un nino (Moto + Brinca), elige que inicia primero y dispara cada parte cuando toque.
         </p>
+        <p className="muted">Tarifa combo: Moto 10 min = 8000 COP, Brinca 15 min = 5000 COP.</p>
       </header>
 
       <form className="inline-form combo-create-form" onSubmit={handleCreateCombo}>
@@ -2206,6 +2226,7 @@ function FinanceTab(props: {
   recentSessions: RideSession[]
   brincaTotal: FinanceTotalRow | null
   brincaRecentSessions: BrincaSession[]
+  comboFinance: ComboFinanceSummary | null
   atvs: Atv[]
   canReset: boolean
   monthKey: string
@@ -2221,6 +2242,7 @@ function FinanceTab(props: {
     recentSessions,
     brincaTotal,
     brincaRecentSessions,
+    comboFinance,
     atvs,
     canReset,
     monthKey,
@@ -2312,6 +2334,21 @@ function FinanceTab(props: {
         <article className="summary-card">
           <span>Total brinca</span>
           <strong>{formatCurrencyCop(brincaTotal?.amount_total_cop ?? 0)}</strong>
+        </article>
+      </section>
+
+      <section className="summary-grid finance">
+        <article className="summary-card">
+          <span>Combos cobrados</span>
+          <strong>{comboFinance?.combo_count ?? 0}</strong>
+        </article>
+        <article className="summary-card">
+          <span>Sesiones de combo</span>
+          <strong>{comboFinance?.session_count ?? 0}</strong>
+        </article>
+        <article className="summary-card">
+          <span>Ingresos combos</span>
+          <strong>{formatCurrencyCop(comboFinance?.amount_total_cop ?? 0)}</strong>
         </article>
       </section>
 
