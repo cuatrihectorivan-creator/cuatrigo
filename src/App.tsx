@@ -884,6 +884,7 @@ function OperationsTab(props: {
 
               <div className="atv-image-wrap" style={{ boxShadow: `inset 0 0 0 1px ${atvColor}4a, 0 14px 28px ${atvColor}2e` }}>
                 <img src="/atv-kid-blue.png" alt={`Cuatrimoto infantil de referencia para ${atv.name}`} className="atv-image" loading="lazy" />
+                <span className="atv-image-shade" style={{ backgroundColor: atvColor }} aria-hidden="true" />
                 <span className="atv-image-tint" style={{ backgroundColor: atvColor }} aria-hidden="true" />
               </div>
 
