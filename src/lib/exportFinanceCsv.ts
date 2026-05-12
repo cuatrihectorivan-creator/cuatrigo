@@ -1,4 +1,4 @@
-import type { Atv, FinanceByAtvRow, FinanceTotalRow, RideSession } from '../types/domain'
+import type { Atv, BrincaSession, FinanceByAtvRow, FinanceTotalRow, RideSession } from '../types/domain'
 
 interface ExportFinanceCsvInput {
   monthKey: string
@@ -6,6 +6,8 @@ interface ExportFinanceCsvInput {
   byAtv: FinanceByAtvRow[]
   total: FinanceTotalRow | null
   recentSessions: RideSession[]
+  brincaTotal: FinanceTotalRow | null
+  brincaRecentSessions: BrincaSession[]
   atvs: Atv[]
 }
 
@@ -35,7 +37,7 @@ function formatDateTime(value: string | null): string {
 }
 
 export function downloadFinanceCsv(input: ExportFinanceCsvInput): void {
-  const { monthKey, monthLabel, byAtv, total, recentSessions, atvs } = input
+  const { monthKey, monthLabel, byAtv, total, recentSessions, brincaTotal, brincaRecentSessions, atvs } = input
   const atvNameById = new Map(atvs.map((atv) => [atv.id, atv.name]))
   const generatedAt = new Intl.DateTimeFormat('es-CO', {
     dateStyle: 'short',
@@ -65,6 +67,11 @@ export function downloadFinanceCsv(input: ExportFinanceCsvInput): void {
   rows.push([total?.session_count ?? 0, total?.minutes_total ?? 0, total?.amount_total_cop ?? 0])
 
   rows.push([])
+  rows.push(['Resumen Brinca Brinca'])
+  rows.push(['Sesiones', 'Minutos cobrados', 'Total COP'])
+  rows.push([brincaTotal?.session_count ?? 0, brincaTotal?.minutes_total ?? 0, brincaTotal?.amount_total_cop ?? 0])
+
+  rows.push([])
   rows.push(['Sesiones cerradas del mes'])
   rows.push(['Moto', 'Inicio', 'Fin', 'Minutos', 'Valor COP', 'Estado'])
   if (recentSessions.length === 0) {
@@ -73,6 +80,24 @@ export function downloadFinanceCsv(input: ExportFinanceCsvInput): void {
     for (const session of recentSessions) {
       rows.push([
         atvNameById.get(session.atv_id) ?? session.atv_id,
+        formatDateTime(session.started_at),
+        formatDateTime(session.ended_at),
+        session.minutes_billed ?? 0,
+        session.amount_cop ?? 0,
+        session.status,
+      ])
+    }
+  }
+
+  rows.push([])
+  rows.push(['Sesiones Brinca cerradas del mes'])
+  rows.push(['Nino', 'Inicio', 'Fin', 'Minutos', 'Valor COP', 'Estado'])
+  if (brincaRecentSessions.length === 0) {
+    rows.push(['Sin sesiones Brinca cerradas en este mes', '', '', '', '', ''])
+  } else {
+    for (const session of brincaRecentSessions) {
+      rows.push([
+        session.child_name,
         formatDateTime(session.started_at),
         formatDateTime(session.ended_at),
         session.minutes_billed ?? 0,

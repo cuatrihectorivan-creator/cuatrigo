@@ -46,6 +46,8 @@ Revisa:
 - `supabase/migrations/0003_add_paused_session_status.sql`
 - `supabase/migrations/0003_sessions_pause_restart_and_finance_reset.sql`
 - `supabase/migrations/0004_expiry_precision_soft_delete_and_colors.sql`
+- `supabase/migrations/0005_brinca_sessions.sql`
+- `supabase/migrations/0006_closed_block_pricing.sql`
 - `supabase/README.md`
 
 ## Deploy en Cloudflare Pages

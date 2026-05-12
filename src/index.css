@@ -306,7 +306,7 @@ thead th {
 
 .summary-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  grid-template-columns: repeat(5, minmax(130px, 1fr));
   gap: 0.75rem;
 }
 
@@ -331,6 +331,35 @@ thead th {
 .summary-card strong {
   font-size: 1.2rem;
   color: #f2f7ff;
+}
+
+.brinca-hero {
+  display: grid;
+  gap: 0.8rem;
+  grid-template-columns: minmax(220px, 330px) 1fr;
+  align-items: stretch;
+}
+
+.brinca-image-wrap {
+  width: 100%;
+  margin: 0;
+}
+
+.brinca-image {
+  filter: none;
+}
+
+.brinca-rate-card {
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: linear-gradient(155deg, rgba(18, 33, 77, 0.86), rgba(14, 26, 63, 0.86));
+  padding: 0.82rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.brinca-start-form {
+  grid-template-columns: minmax(180px, 1.2fr) minmax(150px, 0.7fr) minmax(160px, 0.8fr);
 }
 
 .panel {
@@ -601,6 +630,15 @@ thead th {
   .card-grid {
     grid-template-columns: 1fr;
   }
+
+  .brinca-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .brinca-image-wrap {
+    width: min(100%, 360px);
+    margin-inline: auto;
+  }
 }
 
 @media (max-width: 600px) {
@@ -618,6 +656,10 @@ thead th {
   }
 
   .inline-form {
+    grid-template-columns: 1fr;
+  }
+
+  .brinca-start-form {
     grid-template-columns: 1fr;
   }
 

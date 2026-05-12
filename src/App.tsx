@@ -2,23 +2,34 @@ import type { FormEvent, ReactElement } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { User } from '@supabase/supabase-js'
 import {
+  computeBrincaFinance,
   computeFinance,
   createAtv,
   deleteAtv,
+  extendBrincaSession,
   extendSession,
   fetchAtvs,
+  fetchBrincaSettings,
+  fetchCompletedBrincaSessionsByRange,
+  fetchOpenBrincaSessions,
   fetchCompletedSessionsByRange,
   fetchMyProfile,
   fetchOpenSessions,
   fetchRecentSessions,
+  pauseBrincaSession,
   pauseSession,
+  refreshExpiredBrincaSessions,
   refreshExpiredSessions,
   resetFinanceData,
+  resumeBrincaSession,
   restartSession,
   resumeSession,
+  startBrincaSession,
+  stopBrincaSession,
   startSession,
   stopSession,
   toggleAtvActive,
+  updateBrincaSettings,
   updateAtvRates,
 } from './services/api'
 import {
@@ -31,7 +42,15 @@ import {
 } from './lib/format'
 import { downloadFinanceCsv } from './lib/exportFinanceCsv'
 import { supabase } from './lib/supabase'
-import type { Atv, FinanceByAtvRow, FinanceTotalRow, Profile, RideSession } from './types/domain'
+import type {
+  Atv,
+  BrincaSession,
+  BrincaSettings,
+  FinanceByAtvRow,
+  FinanceTotalRow,
+  Profile,
+  RideSession,
+} from './types/domain'
 
 function monthRangeFromKey(monthKey: string): { startIso: string; endIso: string } {
   const [yearStr, monthStr] = monthKey.split('-')
@@ -71,7 +90,7 @@ function monthLabelFromKey(monthKey: string): string {
   return new Intl.DateTimeFormat('es-CO', { month: 'long', year: 'numeric' }).format(date)
 }
 
-type Tab = 'operations' | 'atvs' | 'finance'
+type Tab = 'operations' | 'brinca' | 'atvs' | 'finance'
 type ToastType = 'error' | 'success'
 const RECENT_FINISH_SIGNAL_MS = 15 * 60 * 1000
 
@@ -88,14 +107,14 @@ function getErrorMessage(error: unknown): string {
   return 'Ocurrio un error inesperado.'
 }
 
-async function maybeNotifyExpiry(atvName: string): Promise<void> {
+async function maybeNotifyExpiry(message: string): Promise<void> {
   if (!('Notification' in window)) {
     return
   }
 
   if (Notification.permission === 'granted') {
     new Notification('Tiempo finalizado', {
-      body: `La cuatrimoto ${atvName} ya supero su tiempo de uso.`,
+      body: message,
     })
     return
   }
@@ -104,7 +123,7 @@ async function maybeNotifyExpiry(atvName: string): Promise<void> {
     const permission = await Notification.requestPermission()
     if (permission === 'granted') {
       new Notification('Tiempo finalizado', {
-        body: `La cuatrimoto ${atvName} ya supero su tiempo de uso.`,
+        body: message,
       })
     }
   }
@@ -238,6 +257,10 @@ function App(): ReactElement {
   const [atvs, setAtvs] = useState<Atv[]>([])
   const [openSessions, setOpenSessions] = useState<RideSession[]>([])
   const [lastClosedSessionByAtv, setLastClosedSessionByAtv] = useState<Record<string, RideSession>>({})
+  const [brincaSettings, setBrincaSettings] = useState<BrincaSettings | null>(null)
+  const [brincaOpenSessions, setBrincaOpenSessions] = useState<BrincaSession[]>([])
+  const [brincaRecentSessions, setBrincaRecentSessions] = useState<BrincaSession[]>([])
+  const [brincaFinanceTotal, setBrincaFinanceTotal] = useState<FinanceTotalRow | null>(null)
   const [recentSessions, setRecentSessions] = useState<RideSession[]>([])
   const [financeByAtv, setFinanceByAtv] = useState<FinanceByAtvRow[]>([])
   const [financeTotal, setFinanceTotal] = useState<FinanceTotalRow | null>(null)
@@ -245,7 +268,9 @@ function App(): ReactElement {
 
   const [tickMs, setTickMs] = useState(() => Date.now())
   const notifiedExpiryRef = useRef<Set<string>>(new Set())
+  const notifiedBrincaExpiryRef = useRef<Set<string>>(new Set())
   const autoClosingRef = useRef<Set<string>>(new Set())
+  const autoClosingBrincaRef = useRef<Set<string>>(new Set())
 
   const userId = user?.id ?? null
   const isAdmin = profile?.role === 'admin'
@@ -255,6 +280,7 @@ function App(): ReactElement {
   }, [openSessions])
 
   const activeAtvCount = openSessions.filter((session) => session.status === 'active').length
+  const activeBrincaCount = brincaOpenSessions.filter((session) => session.status === 'active').length
   const inactiveAtvCount = atvs.filter((atv) => !atv.active).length
   const { startIso: monthStartIso, endIso: monthEndIso } = useMemo(
     () => monthRangeFromKey(selectedMonth),
@@ -271,6 +297,10 @@ function App(): ReactElement {
     setAtvs([])
     setOpenSessions([])
     setLastClosedSessionByAtv({})
+    setBrincaSettings(null)
+    setBrincaOpenSessions([])
+    setBrincaRecentSessions([])
+    setBrincaFinanceTotal(null)
     setRecentSessions([])
     setFinanceByAtv([])
     setFinanceTotal(null)
@@ -284,16 +314,29 @@ function App(): ReactElement {
     setLoading(true)
 
     try {
-      const [nextProfile, nextAtvs, nextOpenSessions, completedSessions, closedSessionsRecent] =
+      const [
+        nextProfile,
+        nextAtvs,
+        nextOpenSessions,
+        completedSessions,
+        closedSessionsRecent,
+        nextBrincaSettings,
+        nextBrincaOpenSessions,
+        nextBrincaCompletedSessions,
+      ] =
         await Promise.all([
           fetchMyProfile(userId),
           fetchAtvs(),
           fetchOpenSessions(),
           fetchCompletedSessionsByRange(monthStartIso, monthEndIso),
           fetchRecentSessions(200),
+          fetchBrincaSettings(),
+          fetchOpenBrincaSessions(),
+          fetchCompletedBrincaSessionsByRange(monthStartIso, monthEndIso),
         ])
 
       const { byAtv, total } = computeFinance(nextAtvs, completedSessions)
+      const brincaTotal = computeBrincaFinance(nextBrincaCompletedSessions)
       const nextLastClosedByAtv: Record<string, RideSession> = {}
       for (const session of closedSessionsRecent) {
         if (session.status !== 'completed') {
@@ -311,6 +354,10 @@ function App(): ReactElement {
       setAtvs(nextAtvs)
       setOpenSessions(nextOpenSessions)
       setLastClosedSessionByAtv(nextLastClosedByAtv)
+      setBrincaSettings(nextBrincaSettings)
+      setBrincaOpenSessions(nextBrincaOpenSessions)
+      setBrincaRecentSessions(nextBrincaCompletedSessions.slice(0, 80))
+      setBrincaFinanceTotal(brincaTotal)
       setRecentSessions(completedSessions.slice(0, 60))
       setFinanceByAtv(byAtv)
       setFinanceTotal(total)
@@ -376,6 +423,12 @@ function App(): ReactElement {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, () => {
         void loadData()
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'brinca_sessions' }, () => {
+        void loadData()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'brinca_settings' }, () => {
+        void loadData()
+      })
       .subscribe()
 
     const interval = window.setInterval(() => {
@@ -403,7 +456,7 @@ function App(): ReactElement {
       const atvName = atvs.find((atv) => atv.id === session.atv_id)?.name ?? 'cuatrimoto'
       notifiedExpiryRef.current.add(session.id)
       justExpiredAtvNames.push(atvName)
-      void maybeNotifyExpiry(atvName)
+      void maybeNotifyExpiry(`La cuatrimoto ${atvName} ya supero su tiempo de uso.`)
     }
 
     if (justExpiredAtvNames.length > 0) {
@@ -421,6 +474,39 @@ function App(): ReactElement {
       })
     }
   }, [openSessions, atvs, tickMs, notify])
+
+  useEffect(() => {
+    const justExpiredKids: string[] = []
+
+    for (const session of brincaOpenSessions) {
+      if (session.status !== 'active') {
+        continue
+      }
+      const remainingMs = getRemainingMs(session.target_end_at, tickMs)
+      if (remainingMs > 0 || notifiedBrincaExpiryRef.current.has(session.id)) {
+        continue
+      }
+
+      notifiedBrincaExpiryRef.current.add(session.id)
+      justExpiredKids.push(session.child_name)
+      void maybeNotifyExpiry(`La sesion de ${session.child_name} en Brinca finalizo.`)
+    }
+
+    if (justExpiredKids.length > 0) {
+      const label =
+        justExpiredKids.length === 1
+          ? `Brinca finalizado: ${justExpiredKids[0]}.`
+          : `Brinca finalizado en ${justExpiredKids.length} sesiones de ninos.`
+      window.setTimeout(() => {
+        notify('error', label)
+      }, 0)
+      void playExpirySound().catch(() => {
+        window.setTimeout(() => {
+          notify('error', 'No se pudo reproducir el sonido de alerta en este navegador.')
+        }, 0)
+      })
+    }
+  }, [brincaOpenSessions, tickMs, notify])
 
   useEffect(() => {
     const sessionsToClose = openSessions.filter(
@@ -451,6 +537,36 @@ function App(): ReactElement {
       }
     })()
   }, [loadData, notify, openSessions, tickMs])
+
+  useEffect(() => {
+    const sessionsToClose = brincaOpenSessions.filter(
+      (session) =>
+        session.status === 'active' &&
+        getRemainingMs(session.target_end_at, tickMs) <= 0 &&
+        !autoClosingBrincaRef.current.has(session.id),
+    )
+
+    if (sessionsToClose.length === 0) {
+      return
+    }
+
+    for (const session of sessionsToClose) {
+      autoClosingBrincaRef.current.add(session.id)
+    }
+
+    void (async () => {
+      try {
+        await refreshExpiredBrincaSessions()
+        await loadData()
+      } catch (error) {
+        notify('error', `No se pudo cerrar una sesion de Brinca vencida automaticamente: ${getErrorMessage(error)}`)
+      } finally {
+        for (const session of sessionsToClose) {
+          autoClosingBrincaRef.current.delete(session.id)
+        }
+      }
+    })()
+  }, [brincaOpenSessions, loadData, notify, tickMs])
 
   const handleSignIn = useCallback(async (email: string, password: string) => {
     setAuthPending(true)
@@ -584,6 +700,60 @@ function App(): ReactElement {
     [loadData, notify],
   )
 
+  const handleUpdateBrincaSettings = useCallback(
+    async (baseMinutes: number, basePriceCop: number) => {
+      await updateBrincaSettings({ baseMinutes, basePriceCop })
+      notify('success', 'Tarifa de Brinca actualizada')
+      await loadData()
+    },
+    [loadData, notify],
+  )
+
+  const handleStartBrincaSession = useCallback(
+    async (childName: string, durationMinutes: number) => {
+      await startBrincaSession({ childName, durationMinutes })
+      notify('success', 'Sesion de Brinca iniciada')
+      await loadData()
+    },
+    [loadData, notify],
+  )
+
+  const handlePauseBrincaSession = useCallback(
+    async (sessionId: string) => {
+      await pauseBrincaSession(sessionId)
+      notify('success', 'Sesion de Brinca pausada')
+      await loadData()
+    },
+    [loadData, notify],
+  )
+
+  const handleResumeBrincaSession = useCallback(
+    async (sessionId: string) => {
+      await resumeBrincaSession(sessionId)
+      notify('success', 'Sesion de Brinca reanudada')
+      await loadData()
+    },
+    [loadData, notify],
+  )
+
+  const handleExtendBrincaSession = useCallback(
+    async (sessionId: string, extraMinutes: number) => {
+      await extendBrincaSession(sessionId, extraMinutes)
+      notify('success', 'Tiempo de Brinca extendido')
+      await loadData()
+    },
+    [loadData, notify],
+  )
+
+  const handleStopBrincaSession = useCallback(
+    async (sessionId: string) => {
+      await stopBrincaSession(sessionId)
+      notify('success', 'Sesion de Brinca cerrada')
+      await loadData()
+    },
+    [loadData, notify],
+  )
+
   const handleResetFinance = useCallback(async () => {
     const deleted = await resetFinanceData()
     notify('success', `Finanzas reiniciadas. Sesiones eliminadas: ${deleted}`)
@@ -597,10 +767,12 @@ function App(): ReactElement {
       byAtv: financeByAtv,
       total: financeTotal,
       recentSessions,
+      brincaTotal: brincaFinanceTotal,
+      brincaRecentSessions,
       atvs,
     })
     notify('success', `Reporte CSV descargado (${selectedMonthLabel}).`)
-  }, [atvs, financeByAtv, financeTotal, notify, recentSessions, selectedMonth, selectedMonthLabel])
+  }, [atvs, brincaFinanceTotal, brincaRecentSessions, financeByAtv, financeTotal, notify, recentSessions, selectedMonth, selectedMonthLabel])
 
   if (!authReady) {
     return (
@@ -645,6 +817,10 @@ function App(): ReactElement {
           <strong>{activeAtvCount}</strong>
         </article>
         <article className="summary-card">
+          <span>Brinca activas</span>
+          <strong>{activeBrincaCount}</strong>
+        </article>
+        <article className="summary-card">
           <span>Motos inactivas</span>
           <strong>{inactiveAtvCount}</strong>
         </article>
@@ -657,6 +833,9 @@ function App(): ReactElement {
       <nav className="tabs" aria-label="Secciones de trabajo">
         <button type="button" className={tab === 'operations' ? 'active' : ''} onClick={() => setTab('operations')}>
           Operacion
+        </button>
+        <button type="button" className={tab === 'brinca' ? 'active' : ''} onClick={() => setTab('brinca')}>
+          Brinca
         </button>
         <button type="button" className={tab === 'atvs' ? 'active' : ''} onClick={() => setTab('atvs')}>
           Cuatrimotos
@@ -681,6 +860,22 @@ function App(): ReactElement {
         />
       ) : null}
 
+      {tab === 'brinca' ? (
+        <BrincaTab
+          canEdit={isAdmin}
+          settings={brincaSettings}
+          openSessions={brincaOpenSessions}
+          tickMs={tickMs}
+          onUpdateSettings={handleUpdateBrincaSettings}
+          onStartSession={handleStartBrincaSession}
+          onPauseSession={handlePauseBrincaSession}
+          onResumeSession={handleResumeBrincaSession}
+          onExtendSession={handleExtendBrincaSession}
+          onStopSession={handleStopBrincaSession}
+          onError={(message) => notify('error', message)}
+        />
+      ) : null}
+
       {tab === 'atvs' ? (
         <AtvAdminTab
           atvs={atvs}
@@ -698,6 +893,8 @@ function App(): ReactElement {
           byAtv={financeByAtv}
           total={financeTotal}
           recentSessions={recentSessions}
+          brincaTotal={brincaFinanceTotal}
+          brincaRecentSessions={brincaRecentSessions}
           atvs={atvs}
           canReset={isAdmin}
           monthKey={selectedMonth}
@@ -996,6 +1193,302 @@ function OperationsTab(props: {
   )
 }
 
+function BrincaTab(props: {
+  canEdit: boolean
+  settings: BrincaSettings | null
+  openSessions: BrincaSession[]
+  tickMs: number
+  onUpdateSettings: (baseMinutes: number, basePriceCop: number) => Promise<void>
+  onStartSession: (childName: string, durationMinutes: number) => Promise<void>
+  onPauseSession: (sessionId: string) => Promise<void>
+  onResumeSession: (sessionId: string) => Promise<void>
+  onExtendSession: (sessionId: string, extraMinutes: number) => Promise<void>
+  onStopSession: (sessionId: string) => Promise<void>
+  onError: (message: string) => void
+}): ReactElement {
+  const {
+    canEdit,
+    settings,
+    openSessions,
+    tickMs,
+    onUpdateSettings,
+    onStartSession,
+    onPauseSession,
+    onResumeSession,
+    onExtendSession,
+    onStopSession,
+    onError,
+  } = props
+
+  const [childName, setChildName] = useState('')
+  const [durationMinutes, setDurationMinutes] = useState(15)
+  const [baseMinutesDraft, setBaseMinutesDraft] = useState<number | null>(null)
+  const [basePriceDraft, setBasePriceDraft] = useState<number | null>(null)
+  const [savingSettings, setSavingSettings] = useState(false)
+  const [busySessionId, setBusySessionId] = useState<string | null>(null)
+  const [startingSession, setStartingSession] = useState(false)
+
+  async function handleSaveSettings(): Promise<void> {
+    if (!canEdit) {
+      onError('Solo admin puede actualizar tarifa de Brinca.')
+      return
+    }
+
+    setSavingSettings(true)
+    try {
+      const nextBaseMinutes = Math.max(1, Math.floor(baseMinutesDraft ?? settings?.base_minutes ?? 15))
+      const nextBasePrice = Math.max(1, Math.floor(basePriceDraft ?? settings?.base_price_cop ?? 5000))
+      await onUpdateSettings(nextBaseMinutes, nextBasePrice)
+    } catch (error) {
+      onError(getErrorMessage(error))
+    } finally {
+      setSavingSettings(false)
+    }
+  }
+
+  async function handleStartSession(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault()
+    const name = childName.trim()
+    if (!name) {
+      onError('Debes escribir el nombre del nino.')
+      return
+    }
+
+    const fallback = settings?.base_minutes ?? 15
+    const duration = Math.max(1, Math.floor(durationMinutes || fallback))
+
+    setStartingSession(true)
+    try {
+      await onStartSession(name, duration)
+      setChildName('')
+    } catch (error) {
+      onError(getErrorMessage(error))
+    } finally {
+      setStartingSession(false)
+    }
+  }
+
+  async function handleStopSession(sessionId: string): Promise<void> {
+    const confirmed = window.confirm('Seguro que deseas detener esta sesion de Brinca? Se cerrara y quedara cobrada.')
+    if (!confirmed) {
+      return
+    }
+
+    setBusySessionId(sessionId)
+    try {
+      await onStopSession(sessionId)
+    } catch (error) {
+      onError(getErrorMessage(error))
+    } finally {
+      setBusySessionId(null)
+    }
+  }
+
+  async function handlePauseSession(sessionId: string): Promise<void> {
+    setBusySessionId(sessionId)
+    try {
+      await onPauseSession(sessionId)
+    } catch (error) {
+      onError(getErrorMessage(error))
+    } finally {
+      setBusySessionId(null)
+    }
+  }
+
+  async function handleResumeSession(sessionId: string): Promise<void> {
+    setBusySessionId(sessionId)
+    try {
+      await onResumeSession(sessionId)
+    } catch (error) {
+      onError(getErrorMessage(error))
+    } finally {
+      setBusySessionId(null)
+    }
+  }
+
+  async function handleExtendSession(sessionId: string): Promise<void> {
+    const value = window.prompt('Cuantos minutos adicionales para esta sesion de Brinca?', '5')
+    if (!value) {
+      return
+    }
+
+    const extraMinutes = Number(value)
+    if (!Number.isFinite(extraMinutes) || extraMinutes <= 0) {
+      onError('Debes ingresar minutos validos.')
+      return
+    }
+
+    const confirmed = window.confirm(`Confirmas agregar ${Math.floor(extraMinutes)} minutos a esta sesion?`)
+    if (!confirmed) {
+      return
+    }
+
+    setBusySessionId(sessionId)
+    try {
+      await onExtendSession(sessionId, Math.floor(extraMinutes))
+    } catch (error) {
+      onError(getErrorMessage(error))
+    } finally {
+      setBusySessionId(null)
+    }
+  }
+
+  return (
+    <section className="panel">
+      <header className="panel-header">
+        <h2>Operacion Brinca</h2>
+        <p className="muted">Sesiones por nino para cama elastica, con cobro automatico por tiempo.</p>
+      </header>
+
+      <div className="brinca-hero">
+        <div className="atv-image-wrap brinca-image-wrap">
+          <img
+            src="/brinca-trampolin.png"
+            alt="Trampolin de cama elastica para sesiones de Brinca"
+            className="atv-image brinca-image"
+            loading="lazy"
+          />
+        </div>
+        <div className="brinca-rate-card">
+          <h3>Tarifa Brinca</h3>
+          <p className="meta">
+            Base actual: {formatMinutes(settings?.base_minutes ?? 15)} = {formatCurrencyCop(settings?.base_price_cop ?? 5000)}
+          </p>
+          <div className="button-row">
+            <label>
+              Base minutos
+              <input
+                type="number"
+                min={1}
+                value={baseMinutesDraft ?? settings?.base_minutes ?? 15}
+                disabled={!canEdit}
+                onChange={(event) => setBaseMinutesDraft(Number(event.target.value))}
+              />
+            </label>
+            <label>
+              Base precio (COP)
+              <input
+                type="number"
+                min={1}
+                value={basePriceDraft ?? settings?.base_price_cop ?? 5000}
+                disabled={!canEdit}
+                onChange={(event) => setBasePriceDraft(Number(event.target.value))}
+              />
+            </label>
+            <button type="button" className="secondary" disabled={!canEdit || savingSettings} onClick={() => void handleSaveSettings()}>
+              {savingSettings ? 'Guardando...' : 'Guardar tarifa'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <form className="inline-form brinca-start-form" onSubmit={handleStartSession}>
+        <label>
+          Nombre del nino
+          <input
+            required
+            value={childName}
+            onChange={(event) => setChildName(event.target.value)}
+            placeholder="Ej: Samuel"
+          />
+        </label>
+        <label>
+          Duracion (minutos)
+          <input
+            type="number"
+            min={1}
+            value={durationMinutes}
+            onChange={(event) => setDurationMinutes(Number(event.target.value))}
+          />
+        </label>
+        <button type="submit" disabled={startingSession}>
+          {startingSession ? 'Iniciando...' : 'Iniciar sesion Brinca'}
+        </button>
+      </form>
+
+      <div className="card-grid">
+        {openSessions.length === 0 ? (
+          <article className="atv-card">
+            <p className="meta">No hay sesiones de Brinca abiertas.</p>
+          </article>
+        ) : (
+          openSessions.map((session) => {
+            const nowForSession =
+              session.status === 'paused'
+                ? new Date(session.paused_at ?? session.updated_at).getTime()
+                : tickMs
+            const remainingMs = getRemainingMs(session.target_end_at, nowForSession)
+            const isExpired = remainingMs <= 0
+            const isPaused = session.status === 'paused'
+            const isRunning = session.status === 'active'
+
+            return (
+              <article key={session.id} className={`atv-card ${isExpired ? 'expired' : ''}`}>
+                <header>
+                  <h3>{session.child_name}</h3>
+                  <span className={`badge ${isPaused ? 'paused' : isRunning ? 'busy' : 'inactive'}`}>
+                    {isPaused ? 'Pausada' : isRunning ? 'En uso' : 'Cerrando...'}
+                  </span>
+                </header>
+
+                <p className="meta">Inicio: {formatDateTime(session.started_at)}</p>
+                <p className="meta">Fin objetivo: {formatDateTime(session.target_end_at)}</p>
+                <p className="meta">
+                  Tarifa aplicada: {formatMinutes(session.base_minutes)} = {formatCurrencyCop(session.base_price_cop)}
+                </p>
+                <p className={`clock ${isExpired ? 'danger-text' : ''}`}>
+                  {isExpired ? 'Vencido' : isPaused ? 'Tiempo restante (pausado)' : 'Tiempo restante'}:{' '}
+                  {formatRemainingClock(remainingMs)}
+                </p>
+
+                <div className="button-row">
+                  {isRunning ? (
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={busySessionId === session.id || isExpired}
+                      onClick={() => void handlePauseSession(session.id)}
+                    >
+                      Pausar
+                    </button>
+                  ) : null}
+                  {isPaused ? (
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={busySessionId === session.id || isExpired}
+                      onClick={() => void handleResumeSession(session.id)}
+                    >
+                      Reanudar
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={busySessionId === session.id || isExpired}
+                    onClick={() => void handleExtendSession(session.id)}
+                  >
+                    + Minutos
+                  </button>
+                  <button
+                    type="button"
+                    className="danger"
+                    disabled={busySessionId === session.id || isExpired}
+                    onClick={() => void handleStopSession(session.id)}
+                  >
+                    Detener
+                  </button>
+                </div>
+              </article>
+            )
+          })
+        )}
+      </div>
+
+    </section>
+  )
+}
+
 function AtvAdminTab(props: {
   atvs: Atv[]
   canEdit: boolean
@@ -1270,6 +1763,8 @@ function FinanceTab(props: {
   byAtv: FinanceByAtvRow[]
   total: FinanceTotalRow | null
   recentSessions: RideSession[]
+  brincaTotal: FinanceTotalRow | null
+  brincaRecentSessions: BrincaSession[]
   atvs: Atv[]
   canReset: boolean
   monthKey: string
@@ -1279,8 +1774,21 @@ function FinanceTab(props: {
   onResetFinance: () => Promise<void>
   onError: (message: string) => void
 }): ReactElement {
-  const { byAtv, total, recentSessions, atvs, canReset, monthKey, monthLabel, onMonthChange, onExportCsv, onResetFinance, onError } =
-    props
+  const {
+    byAtv,
+    total,
+    recentSessions,
+    brincaTotal,
+    brincaRecentSessions,
+    atvs,
+    canReset,
+    monthKey,
+    monthLabel,
+    onMonthChange,
+    onExportCsv,
+    onResetFinance,
+    onError,
+  } = props
 
   function getAtvName(atvId: string): string {
     return atvs.find((item) => item.id === atvId)?.name ?? atvId
@@ -1335,16 +1843,31 @@ function FinanceTab(props: {
 
       <section className="summary-grid finance">
         <article className="summary-card">
-          <span>Sesiones</span>
+          <span>Sesiones motos</span>
           <strong>{total?.session_count ?? 0}</strong>
         </article>
         <article className="summary-card">
-          <span>Minutos cobrados</span>
+          <span>Minutos motos</span>
           <strong>{total?.minutes_total ?? 0}</strong>
         </article>
         <article className="summary-card">
-          <span>Total facturado</span>
+          <span>Total motos</span>
           <strong>{formatCurrencyCop(total?.amount_total_cop ?? 0)}</strong>
+        </article>
+      </section>
+
+      <section className="summary-grid finance">
+        <article className="summary-card">
+          <span>Sesiones brinca</span>
+          <strong>{brincaTotal?.session_count ?? 0}</strong>
+        </article>
+        <article className="summary-card">
+          <span>Minutos brinca</span>
+          <strong>{brincaTotal?.minutes_total ?? 0}</strong>
+        </article>
+        <article className="summary-card">
+          <span>Total brinca</span>
+          <strong>{formatCurrencyCop(brincaTotal?.amount_total_cop ?? 0)}</strong>
         </article>
       </section>
 
@@ -1392,6 +1915,38 @@ function FinanceTab(props: {
               recentSessions.map((session) => (
                 <tr key={session.id}>
                   <td>{getAtvName(session.atv_id)}</td>
+                  <td>{formatDateTime(session.started_at)}</td>
+                  <td>{formatDateTime(session.ended_at)}</td>
+                  <td>{session.minutes_billed ?? 0}</td>
+                  <td>{formatCurrencyCop(session.amount_cop ?? 0)}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Ultimas sesiones Brinca cerradas</h3>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Nino</th>
+              <th>Inicio</th>
+              <th>Fin</th>
+              <th>Minutos</th>
+              <th>Valor</th>
+            </tr>
+          </thead>
+          <tbody>
+            {brincaRecentSessions.length === 0 ? (
+              <tr>
+                <td colSpan={5}>No hay sesiones Brinca cerradas en este mes.</td>
+              </tr>
+            ) : (
+              brincaRecentSessions.map((session) => (
+                <tr key={session.id}>
+                  <td>{session.child_name}</td>
                   <td>{formatDateTime(session.started_at)}</td>
                   <td>{formatDateTime(session.ended_at)}</td>
                   <td>{session.minutes_billed ?? 0}</td>

@@ -20,6 +20,8 @@ Aplica en orden:
 3. `supabase/migrations/0003_add_paused_session_status.sql`
 4. `supabase/migrations/0003_sessions_pause_restart_and_finance_reset.sql`
 5. `supabase/migrations/0004_expiry_precision_soft_delete_and_colors.sql`
+6. `supabase/migrations/0005_brinca_sessions.sql`
+7. `supabase/migrations/0006_closed_block_pricing.sql`
 
 Puedes hacerlo desde SQL Editor o con Supabase CLI.
 
