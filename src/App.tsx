@@ -2,7 +2,9 @@ import type { FormEvent, ReactElement } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { User } from '@supabase/supabase-js'
 import {
+  cancelBrincaSession,
   cancelCombo,
+  cancelSession,
   computeComboFinance,
   computeBrincaFinance,
   computeFinance,
@@ -13,6 +15,8 @@ import {
   extendSession,
   fetchAtvs,
   fetchBrincaSettings,
+  fetchClosedBrincaSessionsByRange,
+  fetchClosedSessionsByRange,
   fetchCombos,
   fetchCompletedBrincaSessionsByRange,
   fetchOpenBrincaSessions,
@@ -28,6 +32,8 @@ import {
   resumeBrincaSession,
   restartSession,
   resumeSession,
+  setBrincaPayment,
+  setSessionPayment,
   startComboBrincaLeg,
   startComboMotoLeg,
   startBrincaSession,
@@ -57,9 +63,75 @@ import type {
   ComboStartMode,
   FinanceByAtvRow,
   FinanceTotalRow,
+  PaymentMethod,
+  PaymentStatus,
   Profile,
   RideSession,
+  SessionStatus,
 } from './types/domain'
+
+const BOGOTA_UTC_OFFSET = '-05:00'
+
+function pad2(value: number): string {
+  return String(value).padStart(2, '0')
+}
+
+function toBogotaDateKey(date: Date): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Bogota',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date)
+
+  const year = Number(parts.find((part) => part.type === 'year')?.value ?? '0')
+  const month = Number(parts.find((part) => part.type === 'month')?.value ?? '1')
+  const day = Number(parts.find((part) => part.type === 'day')?.value ?? '1')
+  return `${year}-${pad2(month)}-${pad2(day)}`
+}
+
+function toBogotaMonthKey(date: Date): string {
+  const dayKey = toBogotaDateKey(date)
+  return dayKey.slice(0, 7)
+}
+
+function parseDayKey(dayKey: string): { year: number; month: number; day: number } | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dayKey)) {
+    return null
+  }
+
+  const [yearStr, monthStr, dayStr] = dayKey.split('-')
+  const year = Number(yearStr)
+  const month = Number(monthStr)
+  const day = Number(dayStr)
+
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+    return null
+  }
+  if (month < 1 || month > 12 || day < 1 || day > 31) {
+    return null
+  }
+
+  return { year, month, day }
+}
+
+function dayRangeFromKey(dayKey: string): { startIso: string; endIso: string } {
+  const parsed = parseDayKey(dayKey)
+  const fallbackKey = toBogotaDateKey(new Date())
+  const safeParsed = parsed ?? parseDayKey(fallbackKey)
+
+  if (!safeParsed) {
+    const now = new Date()
+    const start = now.toISOString()
+    return { startIso: start, endIso: start }
+  }
+
+  const start = new Date(
+    `${safeParsed.year}-${pad2(safeParsed.month)}-${pad2(safeParsed.day)}T00:00:00${BOGOTA_UTC_OFFSET}`,
+  )
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000)
+  return { startIso: start.toISOString(), endIso: end.toISOString() }
+}
 
 function monthRangeFromKey(monthKey: string): { startIso: string; endIso: string } {
   const [yearStr, monthStr] = monthKey.split('-')
@@ -68,7 +140,7 @@ function monthRangeFromKey(monthKey: string): { startIso: string; endIso: string
 
   if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
     const now = new Date()
-    const fallback = monthKeyFromDate(now)
+    const fallback = toBogotaMonthKey(now)
     return monthRangeFromKey(fallback)
   }
 
@@ -76,18 +148,12 @@ function monthRangeFromKey(monthKey: string): { startIso: string; endIso: string
   const nextMonth = month === 12 ? 1 : month + 1
 
   // Rango mensual alineado a America/Bogota (UTC-5) para que cierre contable coincida con la operacion local.
-  const start = new Date(`${yearStr}-${monthStr.padStart(2, '0')}-01T00:00:00-05:00`)
+  const start = new Date(`${yearStr}-${monthStr.padStart(2, '0')}-01T00:00:00${BOGOTA_UTC_OFFSET}`)
   const end = new Date(
-    `${String(nextMonthYear)}-${String(nextMonth).padStart(2, '0')}-01T00:00:00-05:00`,
+    `${String(nextMonthYear)}-${String(nextMonth).padStart(2, '0')}-01T00:00:00${BOGOTA_UTC_OFFSET}`,
   )
 
   return { startIso: start.toISOString(), endIso: end.toISOString() }
-}
-
-function monthKeyFromDate(date: Date): string {
-  const year = date.getUTCFullYear()
-  const month = String(date.getUTCMonth() + 1).padStart(2, '0')
-  return `${year}-${month}`
 }
 
 function monthLabelFromKey(monthKey: string): string {
@@ -98,6 +164,33 @@ function monthLabelFromKey(monthKey: string): string {
 
   return new Intl.DateTimeFormat('es-CO', { month: 'long', year: 'numeric' }).format(date)
 }
+
+function dayLabelFromKey(dayKey: string): string {
+  const parsed = parseDayKey(dayKey)
+  if (!parsed) {
+    return dayKey
+  }
+  const dayDate = new Date(
+    `${parsed.year}-${pad2(parsed.month)}-${pad2(parsed.day)}T00:00:00${BOGOTA_UTC_OFFSET}`,
+  )
+  return new Intl.DateTimeFormat('es-CO', { dateStyle: 'long' }).format(dayDate)
+}
+
+function shiftMonthKey(monthKey: string, deltaMonths: number): string {
+  const [yearStr, monthStr] = monthKey.split('-')
+  const year = Number(yearStr)
+  const month = Number(monthStr)
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
+    return toBogotaMonthKey(new Date())
+  }
+  const base = new Date(Date.UTC(year, month - 1, 1))
+  base.setUTCMonth(base.getUTCMonth() + deltaMonths)
+  const shiftedYear = base.getUTCFullYear()
+  const shiftedMonth = base.getUTCMonth() + 1
+  return `${shiftedYear}-${pad2(shiftedMonth)}`
+}
+
+type FinanceRangeMode = 'today' | 'day' | 'month' | 'range'
 
 type Tab = 'operations' | 'brinca' | 'combos' | 'atvs' | 'finance'
 type ToastType = 'error' | 'success'
@@ -115,6 +208,38 @@ function getErrorMessage(error: unknown): string {
   }
 
   return 'Ocurrio un error inesperado.'
+}
+
+function shortTransactionId(id: string): string {
+  const firstBlock = id.split('-')[0]
+  return firstBlock.toUpperCase()
+}
+
+function paymentStatusLabel(status: PaymentStatus): string {
+  return status === 'paid' ? 'Pagado' : 'Pendiente'
+}
+
+function paymentMethodLabel(method: PaymentMethod): string {
+  if (method === 'cash') {
+    return 'Efectivo'
+  }
+  if (method === 'nequi') {
+    return 'Nequi'
+  }
+  return '-'
+}
+
+function closedStatusLabel(status: SessionStatus): string {
+  if (status === 'cancelled') {
+    return 'Anulada'
+  }
+  if (status === 'completed') {
+    return 'Completada'
+  }
+  if (status === 'paused') {
+    return 'Pausada'
+  }
+  return 'Activa'
 }
 
 async function maybeNotifyExpiry(message: string): Promise<void> {
@@ -324,7 +449,16 @@ function App(): ReactElement {
   const [recentSessions, setRecentSessions] = useState<RideSession[]>([])
   const [financeByAtv, setFinanceByAtv] = useState<FinanceByAtvRow[]>([])
   const [financeTotal, setFinanceTotal] = useState<FinanceTotalRow | null>(null)
-  const [selectedMonth, setSelectedMonth] = useState(() => monthKeyFromDate(new Date()))
+  const [financeRangeMode, setFinanceRangeMode] = useState<FinanceRangeMode>('today')
+  const [selectedDay, setSelectedDay] = useState(() => toBogotaDateKey(new Date()))
+  const [selectedMonth, setSelectedMonth] = useState(() => toBogotaMonthKey(new Date()))
+  const [rangeStartDay, setRangeStartDay] = useState(() => {
+    const today = new Date()
+    const start = new Date(today.getTime() - 6 * 24 * 60 * 60 * 1000)
+    return toBogotaDateKey(start)
+  })
+  const [rangeEndDay, setRangeEndDay] = useState(() => toBogotaDateKey(new Date()))
+  const [rangeMonthsBack, setRangeMonthsBack] = useState(1)
 
   const [tickMs, setTickMs] = useState(() => Date.now())
   const notifiedExpiryRef = useRef<Set<string>>(new Set())
@@ -369,11 +503,54 @@ function App(): ReactElement {
   const activeAtvCount = openSessions.filter((session) => session.status === 'active').length
   const activeBrincaCount = brincaOpenSessions.filter((session) => session.status === 'active').length
   const inactiveAtvCount = atvs.filter((atv) => !atv.active).length
-  const { startIso: monthStartIso, endIso: monthEndIso } = useMemo(
-    () => monthRangeFromKey(selectedMonth),
-    [selectedMonth],
-  )
-  const selectedMonthLabel = useMemo(() => monthLabelFromKey(selectedMonth), [selectedMonth])
+  const financeRange = useMemo(() => {
+    const todayKey = toBogotaDateKey(new Date())
+
+    if (financeRangeMode === 'today') {
+      const { startIso, endIso } = dayRangeFromKey(todayKey)
+      return {
+        startIso,
+        endIso,
+        label: `Hoy (${dayLabelFromKey(todayKey)})`,
+        fileSuffix: todayKey,
+      }
+    }
+
+    if (financeRangeMode === 'day') {
+      const key = parseDayKey(selectedDay) ? selectedDay : todayKey
+      const { startIso, endIso } = dayRangeFromKey(key)
+      return {
+        startIso,
+        endIso,
+        label: dayLabelFromKey(key),
+        fileSuffix: key,
+      }
+    }
+
+    if (financeRangeMode === 'month') {
+      const key = /^\d{4}-\d{2}$/.test(selectedMonth) ? selectedMonth : toBogotaMonthKey(new Date())
+      const { startIso, endIso } = monthRangeFromKey(key)
+      return {
+        startIso,
+        endIso,
+        label: monthLabelFromKey(key),
+        fileSuffix: key,
+      }
+    }
+
+    const validStart = parseDayKey(rangeStartDay) ? rangeStartDay : todayKey
+    const validEnd = parseDayKey(rangeEndDay) ? rangeEndDay : todayKey
+    const orderedStart = validStart <= validEnd ? validStart : validEnd
+    const orderedEnd = validStart <= validEnd ? validEnd : validStart
+    const start = dayRangeFromKey(orderedStart)
+    const end = dayRangeFromKey(orderedEnd)
+    return {
+      startIso: start.startIso,
+      endIso: end.endIso,
+      label: `${dayLabelFromKey(orderedStart)} - ${dayLabelFromKey(orderedEnd)}`,
+      fileSuffix: `${orderedStart}_${orderedEnd}`,
+    }
+  }, [financeRangeMode, rangeEndDay, rangeStartDay, selectedDay, selectedMonth])
   const vibrationSupported = typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function'
 
   const notify = useCallback((type: ToastType, message: string) => {
@@ -437,21 +614,25 @@ function App(): ReactElement {
         nextAtvs,
         nextOpenSessions,
         completedSessions,
+        closedSessionsByRange,
         closedSessionsRecent,
         nextBrincaSettings,
         nextBrincaOpenSessions,
         nextBrincaCompletedSessions,
+        nextBrincaClosedSessions,
         nextCombos,
       ] =
         await Promise.all([
           fetchMyProfile(userId),
           fetchAtvs(),
           fetchOpenSessions(),
-          fetchCompletedSessionsByRange(monthStartIso, monthEndIso),
+          fetchCompletedSessionsByRange(financeRange.startIso, financeRange.endIso),
+          fetchClosedSessionsByRange(financeRange.startIso, financeRange.endIso),
           fetchRecentSessions(200),
           fetchBrincaSettings(),
           fetchOpenBrincaSessions(),
-          fetchCompletedBrincaSessionsByRange(monthStartIso, monthEndIso),
+          fetchCompletedBrincaSessionsByRange(financeRange.startIso, financeRange.endIso),
+          fetchClosedBrincaSessionsByRange(financeRange.startIso, financeRange.endIso),
           fetchCombos(500),
         ])
 
@@ -477,11 +658,11 @@ function App(): ReactElement {
       setLastClosedSessionByAtv(nextLastClosedByAtv)
       setBrincaSettings(nextBrincaSettings)
       setBrincaOpenSessions(nextBrincaOpenSessions)
-      setBrincaRecentSessions(nextBrincaCompletedSessions.slice(0, 80))
+      setBrincaRecentSessions(nextBrincaClosedSessions.slice(0, 120))
       setBrincaFinanceTotal(brincaTotal)
       setComboFinanceTotal(comboTotal)
       setCombos(nextCombos)
-      setRecentSessions(completedSessions.slice(0, 60))
+      setRecentSessions(closedSessionsByRange.slice(0, 120))
       setFinanceByAtv(byAtv)
       setFinanceTotal(total)
     } catch (error) {
@@ -489,7 +670,7 @@ function App(): ReactElement {
     } finally {
       setLoading(false)
     }
-  }, [monthEndIso, monthStartIso, notify, userId])
+  }, [financeRange.endIso, financeRange.startIso, notify, userId])
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -790,9 +971,10 @@ function App(): ReactElement {
 
   const handleStartSession = useCallback(
     async (atvId: string, durationMinutes: number) => {
-      await startSession(atvId, durationMinutes)
+      const sessionId = await startSession(atvId, durationMinutes)
       notify('success', 'Tiempo iniciado')
       await loadData()
+      return sessionId
     },
     [loadData, notify],
   )
@@ -801,6 +983,24 @@ function App(): ReactElement {
     async (sessionId: string) => {
       await stopSession(sessionId)
       notify('success', 'Sesion cerrada')
+      await loadData()
+    },
+    [loadData, notify],
+  )
+
+  const handleSetSessionPayment = useCallback(
+    async (sessionId: string, paymentStatus: PaymentStatus, paymentMethod: PaymentMethod) => {
+      await setSessionPayment(sessionId, paymentStatus, paymentMethod)
+      notify('success', 'Pago de moto actualizado')
+      await loadData()
+    },
+    [loadData, notify],
+  )
+
+  const handleCancelSession = useCallback(
+    async (sessionId: string, annulKey: string) => {
+      await cancelSession(sessionId, annulKey)
+      notify('success', 'Sesion anulada')
       await loadData()
     },
     [loadData, notify],
@@ -853,9 +1053,10 @@ function App(): ReactElement {
 
   const handleStartBrincaSession = useCallback(
     async (childName: string, durationMinutes: number) => {
-      await startBrincaSession({ childName, durationMinutes })
+      const sessionId = await startBrincaSession({ childName, durationMinutes })
       notify('success', 'Sesion de Brinca iniciada')
       await loadData()
+      return sessionId
     },
     [loadData, notify],
   )
@@ -896,6 +1097,24 @@ function App(): ReactElement {
     [loadData, notify],
   )
 
+  const handleSetBrincaPayment = useCallback(
+    async (sessionId: string, paymentStatus: PaymentStatus, paymentMethod: PaymentMethod) => {
+      await setBrincaPayment(sessionId, paymentStatus, paymentMethod)
+      notify('success', 'Pago de Brinca actualizado')
+      await loadData()
+    },
+    [loadData, notify],
+  )
+
+  const handleCancelBrincaSession = useCallback(
+    async (sessionId: string, annulKey: string) => {
+      await cancelBrincaSession(sessionId, annulKey)
+      notify('success', 'Sesion de Brinca anulada')
+      await loadData()
+    },
+    [loadData, notify],
+  )
+
   const handleCreateCombo = useCallback(
     async (input: {
       childName: string
@@ -930,8 +1149,8 @@ function App(): ReactElement {
   )
 
   const handleCancelCombo = useCallback(
-    async (comboId: string) => {
-      await cancelCombo(comboId)
+    async (comboId: string, annulKey: string) => {
+      await cancelCombo(comboId, annulKey)
       notify('success', 'Combo cancelado')
       await loadData()
     },
@@ -944,10 +1163,21 @@ function App(): ReactElement {
     await loadData()
   }, [loadData, notify])
 
+  const handleApplyLastMonthsRange = useCallback(() => {
+    const months = Number.isFinite(rangeMonthsBack) ? Math.floor(rangeMonthsBack) : 1
+    const safeMonths = Math.min(24, Math.max(1, months))
+    const todayKey = toBogotaDateKey(new Date())
+    const currentMonthKey = todayKey.slice(0, 7)
+    const startMonthKey = shiftMonthKey(currentMonthKey, -(safeMonths - 1))
+    setRangeStartDay(`${startMonthKey}-01`)
+    setRangeEndDay(todayKey)
+    setFinanceRangeMode('range')
+  }, [rangeMonthsBack])
+
   const handleExportFinanceCsv = useCallback(() => {
     downloadFinanceCsv({
-      monthKey: selectedMonth,
-      monthLabel: selectedMonthLabel,
+      periodKey: financeRange.fileSuffix,
+      periodLabel: financeRange.label,
       byAtv: financeByAtv,
       total: financeTotal,
       recentSessions,
@@ -956,18 +1186,18 @@ function App(): ReactElement {
       comboFinance: comboFinanceTotal,
       atvs,
     })
-    notify('success', `Reporte CSV descargado (${selectedMonthLabel}).`)
+    notify('success', `Reporte CSV descargado (${financeRange.label}).`)
   }, [
     atvs,
     brincaFinanceTotal,
     brincaRecentSessions,
     comboFinanceTotal,
+    financeRange.fileSuffix,
+    financeRange.label,
     financeByAtv,
     financeTotal,
     notify,
     recentSessions,
-    selectedMonth,
-    selectedMonthLabel,
   ])
 
   if (!authReady) {
@@ -986,7 +1216,7 @@ function App(): ReactElement {
     <main className="app-layout">
       <header className="topbar">
         <div>
-          <p className="brand">CuatriGo MVP</p>
+          <p className="brand">CuatriGo</p>
           <h1>Operacion diaria</h1>
           <p className="muted">
             Usuario: {user.email ?? user.id} | Rol: {profile?.role ?? 'cargando...'}
@@ -1067,6 +1297,9 @@ function App(): ReactElement {
           onResumeSession={handleResumeSession}
           onRestartSession={handleRestartSession}
           onExtendSession={handleExtendSession}
+          onCancelSession={handleCancelSession}
+          onSetSessionPayment={handleSetSessionPayment}
+          onError={(message) => notify('error', message)}
         />
       ) : null}
 
@@ -1083,6 +1316,8 @@ function App(): ReactElement {
           onResumeSession={handleResumeBrincaSession}
           onExtendSession={handleExtendBrincaSession}
           onStopSession={handleStopBrincaSession}
+          onCancelSession={handleCancelBrincaSession}
+          onSetSessionPayment={handleSetBrincaPayment}
           onError={(message) => notify('error', message)}
         />
       ) : null}
@@ -1126,9 +1361,22 @@ function App(): ReactElement {
           comboFinance={comboFinanceTotal}
           atvs={atvs}
           canReset={isAdmin}
-          monthKey={selectedMonth}
-          monthLabel={selectedMonthLabel}
+          rangeMode={financeRangeMode}
+          rangeLabel={financeRange.label}
+          selectedDay={selectedDay}
+          selectedMonth={selectedMonth}
+          rangeStartDay={rangeStartDay}
+          rangeEndDay={rangeEndDay}
+          rangeMonthsBack={rangeMonthsBack}
+          onRangeModeChange={setFinanceRangeMode}
+          onDayChange={setSelectedDay}
           onMonthChange={setSelectedMonth}
+          onRangeStartDayChange={setRangeStartDay}
+          onRangeEndDayChange={setRangeEndDay}
+          onRangeMonthsBackChange={setRangeMonthsBack}
+          onApplyLastMonths={handleApplyLastMonthsRange}
+          onSetSessionPayment={handleSetSessionPayment}
+          onSetBrincaPayment={handleSetBrincaPayment}
           onExportCsv={handleExportFinanceCsv}
           onResetFinance={handleResetFinance}
           onError={(message) => notify('error', message)}
@@ -1146,12 +1394,15 @@ function OperationsTab(props: {
   openSessionByAtv: Map<string, RideSession>
   comboMotoSessionIds: ReadonlySet<string>
   tickMs: number
-  onStartSession: (atvId: string, durationMinutes: number) => Promise<void>
+  onStartSession: (atvId: string, durationMinutes: number) => Promise<string>
   onStopSession: (sessionId: string) => Promise<void>
   onPauseSession: (sessionId: string) => Promise<void>
   onResumeSession: (sessionId: string) => Promise<void>
   onRestartSession: (sessionId: string, durationMinutes: number) => Promise<void>
   onExtendSession: (sessionId: string, extraMinutes: number) => Promise<void>
+  onCancelSession: (sessionId: string, annulKey: string) => Promise<void>
+  onSetSessionPayment: (sessionId: string, paymentStatus: PaymentStatus, paymentMethod: PaymentMethod) => Promise<void>
+  onError: (message: string) => void
 }): ReactElement {
   const {
     atvs,
@@ -1165,15 +1416,39 @@ function OperationsTab(props: {
     onResumeSession,
     onRestartSession,
     onExtendSession,
+    onCancelSession,
+    onSetSessionPayment,
+    onError,
   } = props
   const [startingFor, setStartingFor] = useState<string | null>(null)
   const [durationByAtv, setDurationByAtv] = useState<Record<string, number>>({})
+  const [startPaymentByAtv, setStartPaymentByAtv] = useState<
+    Record<string, { status: PaymentStatus; method: PaymentMethod }>
+  >({})
+  const [paymentDraftBySessionId, setPaymentDraftBySessionId] = useState<
+    Record<string, { status: PaymentStatus; method: PaymentMethod }>
+  >({})
+
+  function getStartPaymentDraft(atvId: string): { status: PaymentStatus; method: PaymentMethod } {
+    return startPaymentByAtv[atvId] ?? { status: 'pending', method: null }
+  }
+
+  function getSessionPaymentDraft(session: RideSession): { status: PaymentStatus; method: PaymentMethod } {
+    return paymentDraftBySessionId[session.id] ?? { status: session.payment_status, method: session.payment_method }
+  }
 
   async function handleStart(atv: Atv): Promise<void> {
     const duration = Math.max(1, Math.floor(durationByAtv[atv.id] ?? atv.base_minutes))
+    const paymentDraft = getStartPaymentDraft(atv.id)
+    const paymentMethod = paymentDraft.status === 'paid' ? paymentDraft.method : null
+    if (paymentDraft.status === 'paid' && !paymentMethod) {
+      return
+    }
+
     setStartingFor(atv.id)
     try {
-      await onStartSession(atv.id, duration)
+      const sessionId = await onStartSession(atv.id, duration)
+      await onSetSessionPayment(sessionId, paymentDraft.status, paymentMethod)
     } finally {
       setStartingFor(null)
     }
@@ -1254,6 +1529,27 @@ function OperationsTab(props: {
     }
   }
 
+  async function handleCancel(sessionId: string): Promise<void> {
+    const annulKey = window.prompt('Ingresa la clave de anulacion para esta sesion')
+    if (!annulKey) {
+      return
+    }
+
+    const confirmed = window.confirm('Confirmas anular esta sesion? No se cobrara en finanzas.')
+    if (!confirmed) {
+      return
+    }
+
+    setStartingFor(sessionId)
+    try {
+      await onCancelSession(sessionId, annulKey)
+    } catch (error) {
+      onError(getErrorMessage(error))
+    } finally {
+      setStartingFor(null)
+    }
+  }
+
   return (
     <section className="panel">
       <header className="panel-header">
@@ -1279,33 +1575,26 @@ function OperationsTab(props: {
           const isRecentlyFinished = Boolean(
             !openSession && lastClosedEndedMs !== null && tickMs - lastClosedEndedMs <= RECENT_FINISH_SIGNAL_MS,
           )
+          const hasRecentFinishSignal = isExpired || isRecentlyFinished
 
           const availabilityLabel = !atv.active
             ? 'Fuera de servicio'
-            : isExpired
-              ? 'Cerrando...'
-              : isRecentlyFinished
-                ? 'Tiempo finalizado'
-                : isRunning
-                  ? 'En uso'
-                  : isPaused
-                    ? 'Pausada'
-                    : 'Disponible'
+            : isRunning
+              ? 'En uso'
+              : isPaused
+                ? 'Pausada'
+                : 'Disponible'
 
           const availabilityClass = !atv.active
             ? 'inactive'
-            : isExpired
-              ? 'paused'
-              : isRecentlyFinished
-                ? 'finished'
-                : isRunning
-                  ? 'busy'
-                  : isPaused
-                    ? 'paused'
-                    : 'ok'
+            : isRunning
+              ? 'busy'
+              : isPaused
+                ? 'paused'
+                : 'ok'
 
           return (
-            <article key={atv.id} className={`atv-card ${isExpired ? 'expired' : ''} ${isRecentlyFinished ? 'recent-finished' : ''}`}>
+            <article key={atv.id} className={`atv-card ${isExpired ? 'expired' : ''} ${hasRecentFinishSignal ? 'recent-finished' : ''}`}>
               <header>
                 <h3>{atv.name}</h3>
                 <span className={`badge ${availabilityClass}`}>{availabilityLabel}</span>
@@ -1326,6 +1615,7 @@ function OperationsTab(props: {
 
               {openSession ? (
                 <>
+                  <p className="meta">ID transaccion: {shortTransactionId(openSession.id)}</p>
                   <p className="meta">Inicio: {formatDateTime(openSession.started_at)}</p>
                   <p className="meta">Fin objetivo: {formatDateTime(openSession.target_end_at)}</p>
                   {isPaused ? <p className="meta">Pausa desde: {formatDateTime(openSession.paused_at)}</p> : null}
@@ -1333,55 +1623,147 @@ function OperationsTab(props: {
                     {isExpired ? 'Vencido' : isPaused ? 'Tiempo restante (pausado)' : 'Tiempo restante'}:{' '}
                     {formatRemainingClock(remainingMs)}
                   </p>
+                  <p className="meta">
+                    Pago: {paymentStatusLabel(openSession.payment_status)} | Medio: {paymentMethodLabel(openSession.payment_method)}
+                  </p>
+                  {!isExpired ? (
+                    <div className="button-row">
+                      {(() => {
+                        const paymentDraft = getSessionPaymentDraft(openSession)
+                        return (
+                          <>
+                            <label>
+                              Estado pago
+                              <select
+                                value={paymentDraft.status}
+                                onChange={(event) => {
+                                  const status = event.target.value as PaymentStatus
+                                  setPaymentDraftBySessionId((current) => ({
+                                    ...current,
+                                    [openSession.id]: {
+                                      status,
+                                      method:
+                                        status === 'pending'
+                                          ? null
+                                          : current[openSession.id]?.method ?? openSession.payment_method ?? 'cash',
+                                    },
+                                  }))
+                                }}
+                              >
+                                <option value="pending">Pendiente</option>
+                                <option value="paid">Pagado</option>
+                              </select>
+                            </label>
+                            <label>
+                              Medio pago
+                              <select
+                                value={paymentDraft.method ?? ''}
+                                disabled={paymentDraft.status !== 'paid' || startingFor === openSession.id}
+                                onChange={(event) => {
+                                  const value = event.target.value as 'cash' | 'nequi' | ''
+                                  setPaymentDraftBySessionId((current) => ({
+                                    ...current,
+                                    [openSession.id]: {
+                                      status: paymentDraft.status,
+                                      method: value ? value : null,
+                                    },
+                                  }))
+                                }}
+                              >
+                                <option value="">Seleccionar</option>
+                                <option value="cash">Efectivo</option>
+                                <option value="nequi">Nequi</option>
+                              </select>
+                            </label>
+                            <button
+                              type="button"
+                              className="secondary"
+                              disabled={
+                                startingFor === openSession.id ||
+                                (paymentDraft.status === 'paid' && !paymentDraft.method)
+                              }
+                              onClick={() =>
+                                void (async () => {
+                                  setStartingFor(openSession.id)
+                                  try {
+                                    await onSetSessionPayment(
+                                      openSession.id,
+                                      paymentDraft.status,
+                                      paymentDraft.status === 'paid' ? paymentDraft.method : null,
+                                    )
+                                  } finally {
+                                    setStartingFor(null)
+                                  }
+                                })()
+                              }
+                            >
+                              Guardar pago
+                            </button>
+                          </>
+                        )
+                      })()}
+                    </div>
+                  ) : null}
                   {isComboSession ? <p className="meta">Sesion de combo: no permite agregar tiempo.</p> : null}
                   {isExpired ? <p className="meta danger-text">Vencido {formatTimeAgo(openSession.target_end_at, tickMs)}.</p> : null}
+                  {hasRecentFinishSignal ? <p className="recent-finish-indicator">Tiempo finalizado recientemente</p> : null}
 
-                  <div className="button-row">
-                    {isRunning ? (
+                  {!isExpired ? (
+                    <div className="button-row">
+                      {isRunning ? (
+                        <button
+                          type="button"
+                          className="secondary"
+                          disabled={startingFor === openSession.id}
+                          onClick={() => void handlePause(openSession.id)}
+                        >
+                          Pausar
+                        </button>
+                      ) : null}
+                      {isPaused ? (
+                        <button
+                          type="button"
+                          className="secondary"
+                          disabled={startingFor === openSession.id}
+                          onClick={() => void handleResume(openSession.id)}
+                        >
+                          Reanudar
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         className="secondary"
-                        disabled={startingFor === openSession.id || isExpired}
-                        onClick={() => void handlePause(openSession.id)}
+                        disabled={startingFor === openSession.id || isComboSession}
+                        onClick={() => void handleExtend(openSession.id)}
                       >
-                        Pausar
+                        + Minutos
                       </button>
-                    ) : null}
-                    {isPaused ? (
                       <button
                         type="button"
                         className="secondary"
-                        disabled={startingFor === openSession.id || isExpired}
-                        onClick={() => void handleResume(openSession.id)}
+                        disabled={startingFor === openSession.id}
+                        onClick={() => void handleRestart(openSession.id, atv.base_minutes)}
                       >
-                        Reanudar
+                        Reiniciar
                       </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      className="secondary"
-                      disabled={startingFor === openSession.id || isExpired || isComboSession}
-                      onClick={() => void handleExtend(openSession.id)}
-                    >
-                      + Minutos
-                    </button>
-                    <button
-                      type="button"
-                      className="secondary"
-                      disabled={startingFor === openSession.id || isExpired}
-                      onClick={() => void handleRestart(openSession.id, atv.base_minutes)}
-                    >
-                      Reiniciar
-                    </button>
-                    <button
-                      type="button"
-                      className="danger"
-                      disabled={startingFor === openSession.id || isExpired}
-                      onClick={() => void handleStop(openSession.id)}
-                    >
-                      Detener
-                    </button>
-                  </div>
+                      <button
+                        type="button"
+                        className="danger"
+                        disabled={startingFor === openSession.id}
+                        onClick={() => void handleStop(openSession.id)}
+                      >
+                        Detener
+                      </button>
+                      <button
+                        type="button"
+                        className="danger"
+                        disabled={startingFor === openSession.id}
+                        onClick={() => void handleCancel(openSession.id)}
+                      >
+                        Anular
+                      </button>
+                    </div>
+                  ) : null}
                   {isExpired ? <p className="meta danger-text">Cierre automatico en proceso...</p> : null}
                 </>
               ) : (
@@ -1390,6 +1772,13 @@ function OperationsTab(props: {
                     <p className="meta">
                       Ultima sesion: termino {formatTimeAgo(lastClosedSession.ended_at, tickMs)} (
                       {formatDateTime(lastClosedSession.ended_at)})
+                    </p>
+                  ) : null}
+                  {lastClosedSession ? <p className="meta">ID transaccion: {shortTransactionId(lastClosedSession.id)}</p> : null}
+                  {lastClosedSession ? (
+                    <p className="meta">
+                      Pago: {paymentStatusLabel(lastClosedSession.payment_status)} | Medio:{' '}
+                      {paymentMethodLabel(lastClosedSession.payment_method)}
                     </p>
                   ) : null}
                   {isRecentlyFinished ? <p className="recent-finish-indicator">Tiempo finalizado recientemente</p> : null}
@@ -1407,10 +1796,54 @@ function OperationsTab(props: {
                       }}
                     />
                   </label>
+                  <label>
+                    Estado pago inicial
+                    <select
+                      value={getStartPaymentDraft(atv.id).status}
+                      onChange={(event) => {
+                        const status = event.target.value as PaymentStatus
+                        setStartPaymentByAtv((current) => ({
+                          ...current,
+                          [atv.id]: {
+                            status,
+                            method: status === 'pending' ? null : current[atv.id]?.method ?? 'cash',
+                          },
+                        }))
+                      }}
+                    >
+                      <option value="pending">Pendiente</option>
+                      <option value="paid">Pagado</option>
+                    </select>
+                  </label>
+                  <label>
+                    Medio pago
+                    <select
+                      value={getStartPaymentDraft(atv.id).method ?? ''}
+                      disabled={getStartPaymentDraft(atv.id).status !== 'paid' || startingFor === atv.id}
+                      onChange={(event) => {
+                        const value = event.target.value as 'cash' | 'nequi' | ''
+                        setStartPaymentByAtv((current) => ({
+                          ...current,
+                          [atv.id]: {
+                            status: getStartPaymentDraft(atv.id).status,
+                            method: value ? value : null,
+                          },
+                        }))
+                      }}
+                    >
+                      <option value="">Seleccionar</option>
+                      <option value="cash">Efectivo</option>
+                      <option value="nequi">Nequi</option>
+                    </select>
+                  </label>
 
                   <button
                     type="button"
-                    disabled={!atv.active || startingFor === atv.id}
+                    disabled={
+                      !atv.active ||
+                      startingFor === atv.id ||
+                      (getStartPaymentDraft(atv.id).status === 'paid' && !getStartPaymentDraft(atv.id).method)
+                    }
                     onClick={() => void handleStart(atv)}
                   >
                     {startingFor === atv.id ? 'Iniciando...' : 'Iniciar tiempo'}
@@ -1432,11 +1865,13 @@ function BrincaTab(props: {
   comboBrincaSessionIds: ReadonlySet<string>
   tickMs: number
   onUpdateSettings: (baseMinutes: number, basePriceCop: number) => Promise<void>
-  onStartSession: (childName: string, durationMinutes: number) => Promise<void>
+  onStartSession: (childName: string, durationMinutes: number) => Promise<string>
   onPauseSession: (sessionId: string) => Promise<void>
   onResumeSession: (sessionId: string) => Promise<void>
   onExtendSession: (sessionId: string, extraMinutes: number) => Promise<void>
   onStopSession: (sessionId: string) => Promise<void>
+  onCancelSession: (sessionId: string, annulKey: string) => Promise<void>
+  onSetSessionPayment: (sessionId: string, paymentStatus: PaymentStatus, paymentMethod: PaymentMethod) => Promise<void>
   onError: (message: string) => void
 }): ReactElement {
   const {
@@ -1451,16 +1886,27 @@ function BrincaTab(props: {
     onResumeSession,
     onExtendSession,
     onStopSession,
+    onCancelSession,
+    onSetSessionPayment,
     onError,
   } = props
 
   const [childName, setChildName] = useState('')
   const [durationMinutes, setDurationMinutes] = useState(15)
+  const [startPaymentStatus, setStartPaymentStatus] = useState<PaymentStatus>('pending')
+  const [startPaymentMethod, setStartPaymentMethod] = useState<PaymentMethod>(null)
   const [baseMinutesDraft, setBaseMinutesDraft] = useState<number | null>(null)
   const [basePriceDraft, setBasePriceDraft] = useState<number | null>(null)
   const [savingSettings, setSavingSettings] = useState(false)
   const [busySessionId, setBusySessionId] = useState<string | null>(null)
   const [startingSession, setStartingSession] = useState(false)
+  const [paymentDraftBySessionId, setPaymentDraftBySessionId] = useState<
+    Record<string, { status: PaymentStatus; method: PaymentMethod }>
+  >({})
+
+  function getPaymentDraft(session: BrincaSession): { status: PaymentStatus; method: PaymentMethod } {
+    return paymentDraftBySessionId[session.id] ?? { status: session.payment_status, method: session.payment_method }
+  }
 
   async function handleSaveSettings(): Promise<void> {
     if (!canEdit) {
@@ -1490,10 +1936,15 @@ function BrincaTab(props: {
 
     const fallback = settings?.base_minutes ?? 15
     const duration = Math.max(1, Math.floor(durationMinutes || fallback))
+    if (startPaymentStatus === 'paid' && !startPaymentMethod) {
+      onError('Si el pago inicial es Pagado, debes elegir Efectivo o Nequi.')
+      return
+    }
 
     setStartingSession(true)
     try {
-      await onStartSession(name, duration)
+      const sessionId = await onStartSession(name, duration)
+      await onSetSessionPayment(sessionId, startPaymentStatus, startPaymentStatus === 'paid' ? startPaymentMethod : null)
       setChildName('')
     } catch (error) {
       onError(getErrorMessage(error))
@@ -1560,6 +2011,44 @@ function BrincaTab(props: {
     setBusySessionId(sessionId)
     try {
       await onExtendSession(sessionId, Math.floor(extraMinutes))
+    } catch (error) {
+      onError(getErrorMessage(error))
+    } finally {
+      setBusySessionId(null)
+    }
+  }
+
+  async function handleCancelSession(sessionId: string): Promise<void> {
+    const annulKey = window.prompt('Ingresa la clave de anulacion para esta sesion de Brinca')
+    if (!annulKey) {
+      return
+    }
+
+    const confirmed = window.confirm('Confirmas anular esta sesion? No se cobrara en finanzas.')
+    if (!confirmed) {
+      return
+    }
+
+    setBusySessionId(sessionId)
+    try {
+      await onCancelSession(sessionId, annulKey)
+    } catch (error) {
+      onError(getErrorMessage(error))
+    } finally {
+      setBusySessionId(null)
+    }
+  }
+
+  async function handleSaveSessionPayment(session: BrincaSession): Promise<void> {
+    const draft = getPaymentDraft(session)
+    if (draft.status === 'paid' && !draft.method) {
+      onError('Para marcar pagado debes elegir Efectivo o Nequi.')
+      return
+    }
+
+    setBusySessionId(session.id)
+    try {
+      await onSetSessionPayment(session.id, draft.status, draft.status === 'paid' ? draft.method : null)
     } catch (error) {
       onError(getErrorMessage(error))
     } finally {
@@ -1635,6 +2124,37 @@ function BrincaTab(props: {
             onChange={(event) => setDurationMinutes(Number(event.target.value))}
           />
         </label>
+        <label>
+          Estado pago inicial
+          <select
+            value={startPaymentStatus}
+            onChange={(event) => {
+              const status = event.target.value as PaymentStatus
+              setStartPaymentStatus(status)
+              if (status === 'pending') {
+                setStartPaymentMethod(null)
+              }
+            }}
+          >
+            <option value="pending">Pendiente</option>
+            <option value="paid">Pagado</option>
+          </select>
+        </label>
+        <label>
+          Medio pago
+          <select
+            value={startPaymentMethod ?? ''}
+            disabled={startPaymentStatus !== 'paid' || startingSession}
+            onChange={(event) => {
+              const value = event.target.value as 'cash' | 'nequi' | ''
+              setStartPaymentMethod(value ? value : null)
+            }}
+          >
+            <option value="">Seleccionar</option>
+            <option value="cash">Efectivo</option>
+            <option value="nequi">Nequi</option>
+          </select>
+        </label>
         <button type="submit" disabled={startingSession}>
           {startingSession ? 'Iniciando...' : 'Iniciar sesion Brinca'}
         </button>
@@ -1666,6 +2186,7 @@ function BrincaTab(props: {
                   </span>
                 </header>
 
+                <p className="meta">ID transaccion: {shortTransactionId(session.id)}</p>
                 <p className="meta">Inicio: {formatDateTime(session.started_at)}</p>
                 <p className="meta">Fin objetivo: {formatDateTime(session.target_end_at)}</p>
                 <p className="meta">
@@ -1675,6 +2196,68 @@ function BrincaTab(props: {
                   {isExpired ? 'Vencido' : isPaused ? 'Tiempo restante (pausado)' : 'Tiempo restante'}:{' '}
                   {formatRemainingClock(remainingMs)}
                 </p>
+                <p className="meta">
+                  Pago: {paymentStatusLabel(session.payment_status)} | Medio: {paymentMethodLabel(session.payment_method)}
+                </p>
+                {!isExpired ? (
+                  <div className="button-row">
+                    {(() => {
+                      const paymentDraft = getPaymentDraft(session)
+                      return (
+                        <>
+                          <label>
+                            Estado pago
+                            <select
+                              value={paymentDraft.status}
+                              onChange={(event) => {
+                                const status = event.target.value as PaymentStatus
+                                setPaymentDraftBySessionId((current) => ({
+                                  ...current,
+                                  [session.id]: {
+                                    status,
+                                    method: status === 'pending' ? null : current[session.id]?.method ?? session.payment_method ?? 'cash',
+                                  },
+                                }))
+                              }}
+                            >
+                              <option value="pending">Pendiente</option>
+                              <option value="paid">Pagado</option>
+                            </select>
+                          </label>
+                          <label>
+                            Medio pago
+                            <select
+                              value={paymentDraft.method ?? ''}
+                              disabled={paymentDraft.status !== 'paid' || busySessionId === session.id}
+                              onChange={(event) => {
+                                const value = event.target.value as 'cash' | 'nequi' | ''
+                                setPaymentDraftBySessionId((current) => ({
+                                  ...current,
+                                  [session.id]: {
+                                    status: paymentDraft.status,
+                                    method: value ? value : null,
+                                  },
+                                }))
+                              }}
+                            >
+                              <option value="">Seleccionar</option>
+                              <option value="cash">Efectivo</option>
+                              <option value="nequi">Nequi</option>
+                            </select>
+                          </label>
+                          <button
+                            type="button"
+                            className="secondary"
+                            disabled={busySessionId === session.id || (paymentDraft.status === 'paid' && !paymentDraft.method)}
+                            onClick={() => void handleSaveSessionPayment(session)}
+                          >
+                            Guardar pago
+                          </button>
+                        </>
+                      )
+                    })()}
+                  </div>
+                ) : null}
                 {isComboSession ? <p className="meta">Sesion de combo: no permite agregar tiempo.</p> : null}
 
                 <div className="button-row">
@@ -1714,6 +2297,14 @@ function BrincaTab(props: {
                   >
                     Detener
                   </button>
+                  <button
+                    type="button"
+                    className="danger"
+                    disabled={busySessionId === session.id || isExpired}
+                    onClick={() => void handleCancelSession(session.id)}
+                  >
+                    Anular
+                  </button>
                 </div>
               </article>
             )
@@ -1742,7 +2333,7 @@ function CombosTab(props: {
   }) => Promise<void>
   onStartMotoLeg: (comboId: string, atvId?: string | null) => Promise<void>
   onStartBrincaLeg: (comboId: string) => Promise<void>
-  onCancelCombo: (comboId: string) => Promise<void>
+  onCancelCombo: (comboId: string, annulKey: string) => Promise<void>
   onError: (message: string) => void
 }): ReactElement {
   const {
@@ -1884,6 +2475,11 @@ function CombosTab(props: {
   }
 
   async function handleCancel(comboId: string): Promise<void> {
+    const annulKey = window.prompt('Ingresa la clave de anulacion para este combo')
+    if (!annulKey) {
+      return
+    }
+
     const confirmed = window.confirm('Seguro que deseas cancelar este combo?')
     if (!confirmed) {
       return
@@ -1891,7 +2487,7 @@ function CombosTab(props: {
 
     setBusyComboId(comboId)
     try {
-      await onCancelCombo(comboId)
+      await onCancelCombo(comboId, annulKey)
     } catch (error) {
       onError(getErrorMessage(error))
     } finally {
@@ -1987,6 +2583,7 @@ function CombosTab(props: {
                   <span className={`badge ${statusBadge.className}`}>{statusBadge.label}</span>
                 </header>
 
+                <p className="meta">ID combo: {shortTransactionId(combo.id)}</p>
                 <p className="meta">Orden: {startModeLabel(combo.start_mode)}</p>
                 <p className="meta">Creado: {formatDateTime(combo.created_at)}</p>
                 <p className="meta">
@@ -1999,6 +2596,7 @@ function CombosTab(props: {
                     <strong>Moto</strong>
                     <span className={`badge ${motoBadge.className}`}>{motoBadge.label}</span>
                   </div>
+                  {combo.moto_session_id ? <p className="meta">ID transaccion moto: {shortTransactionId(combo.moto_session_id)}</p> : null}
                   <p className="meta">Duracion: {formatMinutes(combo.moto_duration_minutes)}</p>
                   {combo.moto_completed_at ? (
                     <p className="meta">
@@ -2053,6 +2651,7 @@ function CombosTab(props: {
                     <strong>Brinca</strong>
                     <span className={`badge ${brincaBadge.className}`}>{brincaBadge.label}</span>
                   </div>
+                  {combo.brinca_session_id ? <p className="meta">ID transaccion brinca: {shortTransactionId(combo.brinca_session_id)}</p> : null}
                   <p className="meta">Duracion: {formatMinutes(combo.brinca_duration_minutes)}</p>
                   {combo.brinca_completed_at ? (
                     <p className="meta">
@@ -2369,9 +2968,22 @@ function FinanceTab(props: {
   comboFinance: ComboFinanceSummary | null
   atvs: Atv[]
   canReset: boolean
-  monthKey: string
-  monthLabel: string
+  rangeMode: FinanceRangeMode
+  rangeLabel: string
+  selectedDay: string
+  selectedMonth: string
+  rangeStartDay: string
+  rangeEndDay: string
+  rangeMonthsBack: number
+  onRangeModeChange: (value: FinanceRangeMode) => void
+  onDayChange: (value: string) => void
   onMonthChange: (value: string) => void
+  onRangeStartDayChange: (value: string) => void
+  onRangeEndDayChange: (value: string) => void
+  onRangeMonthsBackChange: (value: number) => void
+  onApplyLastMonths: () => void
+  onSetSessionPayment: (sessionId: string, paymentStatus: PaymentStatus, paymentMethod: PaymentMethod) => Promise<void>
+  onSetBrincaPayment: (sessionId: string, paymentStatus: PaymentStatus, paymentMethod: PaymentMethod) => Promise<void>
   onExportCsv: () => void
   onResetFinance: () => Promise<void>
   onError: (message: string) => void
@@ -2385,9 +2997,22 @@ function FinanceTab(props: {
     comboFinance,
     atvs,
     canReset,
-    monthKey,
-    monthLabel,
+    rangeMode,
+    rangeLabel,
+    selectedDay,
+    selectedMonth,
+    rangeStartDay,
+    rangeEndDay,
+    rangeMonthsBack,
+    onRangeModeChange,
+    onDayChange,
     onMonthChange,
+    onRangeStartDayChange,
+    onRangeEndDayChange,
+    onRangeMonthsBackChange,
+    onApplyLastMonths,
+    onSetSessionPayment,
+    onSetBrincaPayment,
     onExportCsv,
     onResetFinance,
     onError,
@@ -2395,9 +3020,67 @@ function FinanceTab(props: {
   const globalSessionCount = (total?.session_count ?? 0) + (brincaTotal?.session_count ?? 0)
   const globalMinutes = (total?.minutes_total ?? 0) + (brincaTotal?.minutes_total ?? 0)
   const globalAmountCop = (total?.amount_total_cop ?? 0) + (brincaTotal?.amount_total_cop ?? 0)
+  const [motoPaymentDrafts, setMotoPaymentDrafts] = useState<Record<string, { status: PaymentStatus; method: PaymentMethod }>>({})
+  const [brincaPaymentDrafts, setBrincaPaymentDrafts] = useState<Record<string, { status: PaymentStatus; method: PaymentMethod }>>({})
+  const [savingMotoPaymentId, setSavingMotoPaymentId] = useState<string | null>(null)
+  const [savingBrincaPaymentId, setSavingBrincaPaymentId] = useState<string | null>(null)
 
   function getAtvName(atvId: string): string {
     return atvs.find((item) => item.id === atvId)?.name ?? atvId
+  }
+
+  function getMotoPaymentDraft(session: RideSession): { status: PaymentStatus; method: PaymentMethod } {
+    return (
+      motoPaymentDrafts[session.id] ?? {
+        status: session.payment_status,
+        method: session.payment_method,
+      }
+    )
+  }
+
+  function getBrincaPaymentDraft(session: BrincaSession): { status: PaymentStatus; method: PaymentMethod } {
+    return (
+      brincaPaymentDrafts[session.id] ?? {
+        status: session.payment_status,
+        method: session.payment_method,
+      }
+    )
+  }
+
+  async function handleSaveMotoPayment(session: RideSession): Promise<void> {
+    const draft = getMotoPaymentDraft(session)
+    const method = draft.status === 'paid' ? draft.method : null
+    if (draft.status === 'paid' && !method) {
+      onError('Para marcar pagado debes elegir medio de pago (Efectivo o Nequi).')
+      return
+    }
+
+    setSavingMotoPaymentId(session.id)
+    try {
+      await onSetSessionPayment(session.id, draft.status, method)
+    } catch (error) {
+      onError(getErrorMessage(error))
+    } finally {
+      setSavingMotoPaymentId(null)
+    }
+  }
+
+  async function handleSaveBrincaPayment(session: BrincaSession): Promise<void> {
+    const draft = getBrincaPaymentDraft(session)
+    const method = draft.status === 'paid' ? draft.method : null
+    if (draft.status === 'paid' && !method) {
+      onError('Para marcar pagado debes elegir medio de pago (Efectivo o Nequi).')
+      return
+    }
+
+    setSavingBrincaPaymentId(session.id)
+    try {
+      await onSetBrincaPayment(session.id, draft.status, method)
+    } catch (error) {
+      onError(getErrorMessage(error))
+    } finally {
+      setSavingBrincaPaymentId(null)
+    }
   }
 
   async function handleResetFinance(): Promise<void> {
@@ -2423,21 +3106,91 @@ function FinanceTab(props: {
   return (
     <section className="panel">
       <header className="panel-header">
-        <h2>Resumen financiero por mes</h2>
-        <p className="muted">Consolidado de motos + Brinca y total global de {monthLabel}.</p>
+        <h2>Resumen financiero</h2>
+        <p className="muted">Consolidado de motos + Brinca + combos para: {rangeLabel}.</p>
         <div className="finance-controls">
           <label>
-            Mes
-            <input
-              type="month"
-              value={monthKey}
-              onChange={(event) => {
-                if (event.target.value) {
-                  onMonthChange(event.target.value)
-                }
-              }}
-            />
+            Corte
+            <select value={rangeMode} onChange={(event) => onRangeModeChange(event.target.value as FinanceRangeMode)}>
+              <option value="today">Hoy</option>
+              <option value="day">Dia</option>
+              <option value="month">Mes</option>
+              <option value="range">Rango</option>
+            </select>
           </label>
+          {rangeMode === 'day' ? (
+            <label>
+              Dia
+              <input
+                type="date"
+                value={selectedDay}
+                onChange={(event) => {
+                  if (event.target.value) {
+                    onDayChange(event.target.value)
+                  }
+                }}
+              />
+            </label>
+          ) : null}
+          {rangeMode === 'month' ? (
+            <label>
+              Mes
+              <input
+                type="month"
+                value={selectedMonth}
+                onChange={(event) => {
+                  if (event.target.value) {
+                    onMonthChange(event.target.value)
+                  }
+                }}
+              />
+            </label>
+          ) : null}
+          {rangeMode === 'range' ? (
+            <>
+              <label>
+                Desde
+                <input
+                  type="date"
+                  value={rangeStartDay}
+                  onChange={(event) => {
+                    if (event.target.value) {
+                      onRangeStartDayChange(event.target.value)
+                    }
+                  }}
+                />
+              </label>
+              <label>
+                Hasta
+                <input
+                  type="date"
+                  value={rangeEndDay}
+                  onChange={(event) => {
+                    if (event.target.value) {
+                      onRangeEndDayChange(event.target.value)
+                    }
+                  }}
+                />
+              </label>
+              <label>
+                Ultimos meses
+                <input
+                  type="number"
+                  min={1}
+                  max={24}
+                  step={1}
+                  value={rangeMonthsBack}
+                  onChange={(event) => {
+                    const nextValue = Number(event.target.value)
+                    onRangeMonthsBackChange(Number.isFinite(nextValue) ? nextValue : 1)
+                  }}
+                />
+              </label>
+              <button type="button" className="secondary" onClick={onApplyLastMonths}>
+                Aplicar X meses
+              </button>
+            </>
+          ) : null}
           <button type="button" className="secondary" onClick={onExportCsv}>
             Descargar CSV
           </button>
@@ -2447,7 +3200,7 @@ function FinanceTab(props: {
         </div>
       </header>
 
-      <section className="summary-grid finance">
+      <section className="summary-grid finance finance-block finance-block-motos">
         <article className="summary-card">
           <span>Sesiones motos</span>
           <strong>{total?.session_count ?? 0}</strong>
@@ -2462,7 +3215,7 @@ function FinanceTab(props: {
         </article>
       </section>
 
-      <section className="summary-grid finance">
+      <section className="summary-grid finance finance-block finance-block-brinca">
         <article className="summary-card">
           <span>Sesiones brinca</span>
           <strong>{brincaTotal?.session_count ?? 0}</strong>
@@ -2477,7 +3230,7 @@ function FinanceTab(props: {
         </article>
       </section>
 
-      <section className="summary-grid finance">
+      <section className="summary-grid finance finance-block finance-block-combos">
         <article className="summary-card">
           <span>Combos cobrados</span>
           <strong>{comboFinance?.combo_count ?? 0}</strong>
@@ -2492,7 +3245,7 @@ function FinanceTab(props: {
         </article>
       </section>
 
-      <section className="summary-grid finance">
+      <section className="summary-grid finance finance-block">
         <article className="summary-card">
           <span>Sesiones global</span>
           <strong>{globalSessionCount}</strong>
@@ -2535,28 +3288,96 @@ function FinanceTab(props: {
         <table>
           <thead>
             <tr>
+              <th>ID</th>
               <th>Moto</th>
               <th>Inicio</th>
               <th>Fin</th>
               <th>Minutos</th>
               <th>Valor</th>
+              <th>Estado</th>
+              <th>Estado pago</th>
+              <th>Medio</th>
+              <th>Accion</th>
             </tr>
           </thead>
           <tbody>
             {recentSessions.length === 0 ? (
               <tr>
-                <td colSpan={5}>No hay sesiones cerradas en este mes.</td>
+                <td colSpan={10}>No hay sesiones cerradas en este periodo.</td>
               </tr>
             ) : (
-              recentSessions.map((session) => (
-                <tr key={session.id}>
-                  <td>{getAtvName(session.atv_id)}</td>
-                  <td>{formatDateTime(session.started_at)}</td>
-                  <td>{formatDateTime(session.ended_at)}</td>
-                  <td>{session.minutes_billed ?? 0}</td>
-                  <td>{formatCurrencyCop(session.amount_cop ?? 0)}</td>
-                </tr>
-              ))
+              recentSessions.map((session) => {
+                const draft = getMotoPaymentDraft(session)
+                const isCancelled = session.status === 'cancelled'
+                return (
+                  <tr key={session.id}>
+                    <td>{shortTransactionId(session.id)}</td>
+                    <td>{getAtvName(session.atv_id)}</td>
+                    <td>{formatDateTime(session.started_at)}</td>
+                    <td>{formatDateTime(session.ended_at)}</td>
+                    <td>{session.minutes_billed ?? 0}</td>
+                    <td>{formatCurrencyCop(session.amount_cop ?? 0)}</td>
+                    <td>
+                      <span className={`badge ${isCancelled ? 'inactive' : 'finished'}`}>
+                        {closedStatusLabel(session.status)}
+                      </span>
+                    </td>
+                    <td>
+                      <select
+                        value={draft.status}
+                        disabled={isCancelled}
+                        onChange={(event) => {
+                          const status = event.target.value as PaymentStatus
+                          setMotoPaymentDrafts((current) => ({
+                            ...current,
+                            [session.id]: {
+                              status,
+                              method: status === 'pending' ? null : current[session.id]?.method ?? session.payment_method ?? 'cash',
+                            },
+                          }))
+                        }}
+                      >
+                        <option value="pending">Pendiente</option>
+                        <option value="paid">Pagado</option>
+                      </select>
+                    </td>
+                    <td>
+                      <select
+                        value={draft.method ?? ''}
+                        disabled={isCancelled || draft.status !== 'paid'}
+                        onChange={(event) => {
+                          const value = event.target.value as 'cash' | 'nequi' | ''
+                          setMotoPaymentDrafts((current) => ({
+                            ...current,
+                            [session.id]: {
+                              status: draft.status,
+                              method: value ? value : null,
+                            },
+                          }))
+                        }}
+                      >
+                        <option value="">Seleccionar</option>
+                        <option value="cash">Efectivo</option>
+                        <option value="nequi">Nequi</option>
+                      </select>
+                    </td>
+                    <td>
+                      {isCancelled ? (
+                        <span className="muted">No aplica</span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="secondary"
+                          disabled={savingMotoPaymentId === session.id}
+                          onClick={() => void handleSaveMotoPayment(session)}
+                        >
+                          {savingMotoPaymentId === session.id ? 'Guardando...' : 'Guardar'}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })
             )}
           </tbody>
         </table>
@@ -2567,28 +3388,96 @@ function FinanceTab(props: {
         <table>
           <thead>
             <tr>
+              <th>ID</th>
               <th>Nino</th>
               <th>Inicio</th>
               <th>Fin</th>
               <th>Minutos</th>
               <th>Valor</th>
+              <th>Estado</th>
+              <th>Estado pago</th>
+              <th>Medio</th>
+              <th>Accion</th>
             </tr>
           </thead>
           <tbody>
             {brincaRecentSessions.length === 0 ? (
               <tr>
-                <td colSpan={5}>No hay sesiones Brinca cerradas en este mes.</td>
+                <td colSpan={10}>No hay sesiones Brinca cerradas en este periodo.</td>
               </tr>
             ) : (
-              brincaRecentSessions.map((session) => (
-                <tr key={session.id}>
-                  <td>{session.child_name}</td>
-                  <td>{formatDateTime(session.started_at)}</td>
-                  <td>{formatDateTime(session.ended_at)}</td>
-                  <td>{session.minutes_billed ?? 0}</td>
-                  <td>{formatCurrencyCop(session.amount_cop ?? 0)}</td>
-                </tr>
-              ))
+              brincaRecentSessions.map((session) => {
+                const draft = getBrincaPaymentDraft(session)
+                const isCancelled = session.status === 'cancelled'
+                return (
+                  <tr key={session.id}>
+                    <td>{shortTransactionId(session.id)}</td>
+                    <td>{session.child_name}</td>
+                    <td>{formatDateTime(session.started_at)}</td>
+                    <td>{formatDateTime(session.ended_at)}</td>
+                    <td>{session.minutes_billed ?? 0}</td>
+                    <td>{formatCurrencyCop(session.amount_cop ?? 0)}</td>
+                    <td>
+                      <span className={`badge ${isCancelled ? 'inactive' : 'finished'}`}>
+                        {closedStatusLabel(session.status)}
+                      </span>
+                    </td>
+                    <td>
+                      <select
+                        value={draft.status}
+                        disabled={isCancelled}
+                        onChange={(event) => {
+                          const status = event.target.value as PaymentStatus
+                          setBrincaPaymentDrafts((current) => ({
+                            ...current,
+                            [session.id]: {
+                              status,
+                              method: status === 'pending' ? null : current[session.id]?.method ?? session.payment_method ?? 'cash',
+                            },
+                          }))
+                        }}
+                      >
+                        <option value="pending">Pendiente</option>
+                        <option value="paid">Pagado</option>
+                      </select>
+                    </td>
+                    <td>
+                      <select
+                        value={draft.method ?? ''}
+                        disabled={isCancelled || draft.status !== 'paid'}
+                        onChange={(event) => {
+                          const value = event.target.value as 'cash' | 'nequi' | ''
+                          setBrincaPaymentDrafts((current) => ({
+                            ...current,
+                            [session.id]: {
+                              status: draft.status,
+                              method: value ? value : null,
+                            },
+                          }))
+                        }}
+                      >
+                        <option value="">Seleccionar</option>
+                        <option value="cash">Efectivo</option>
+                        <option value="nequi">Nequi</option>
+                      </select>
+                    </td>
+                    <td>
+                      {isCancelled ? (
+                        <span className="muted">No aplica</span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="secondary"
+                          disabled={savingBrincaPaymentId === session.id}
+                          onClick={() => void handleSaveBrincaPayment(session)}
+                        >
+                          {savingBrincaPaymentId === session.id ? 'Guardando...' : 'Guardar'}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })
             )}
           </tbody>
         </table>

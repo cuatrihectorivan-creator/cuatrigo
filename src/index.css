@@ -379,6 +379,21 @@ thead th {
   color: #f2f7ff;
 }
 
+.finance-block-motos .summary-card {
+  border-color: rgba(72, 146, 255, 0.46);
+  background: linear-gradient(155deg, rgba(22, 46, 109, 0.88), rgba(13, 32, 82, 0.88));
+}
+
+.finance-block-brinca .summary-card {
+  border-color: rgba(62, 201, 255, 0.46);
+  background: linear-gradient(155deg, rgba(13, 64, 113, 0.86), rgba(10, 45, 90, 0.88));
+}
+
+.finance-block-combos .summary-card {
+  border-color: rgba(130, 128, 255, 0.45);
+  background: linear-gradient(155deg, rgba(34, 37, 110, 0.88), rgba(24, 27, 89, 0.88));
+}
+
 .brinca-hero {
   display: grid;
   gap: 0.8rem;
@@ -405,7 +420,7 @@ thead th {
 }
 
 .brinca-start-form {
-  grid-template-columns: minmax(180px, 1.2fr) minmax(150px, 0.7fr) minmax(160px, 0.8fr);
+  grid-template-columns: repeat(5, minmax(140px, 1fr));
 }
 
 .combo-create-form {

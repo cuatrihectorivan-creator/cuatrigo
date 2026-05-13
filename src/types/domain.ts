@@ -2,6 +2,8 @@ export type UserRole = 'admin' | 'operator'
 export type SessionStatus = 'active' | 'paused' | 'completed' | 'cancelled'
 export type ComboStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled'
 export type ComboStartMode = 'moto_first' | 'brinca_first' | 'either'
+export type PaymentStatus = 'pending' | 'paid'
+export type PaymentMethod = 'cash' | 'nequi' | null
 
 export interface Profile {
   id: string
@@ -32,6 +34,8 @@ export interface RideSession {
   paused_at: string | null
   ended_at: string | null
   status: SessionStatus
+  payment_status: PaymentStatus
+  payment_method: PaymentMethod
   minutes_billed: number | null
   amount_cop: number | null
   created_at: string
@@ -76,6 +80,8 @@ export interface BrincaSession {
   paused_at: string | null
   ended_at: string | null
   status: SessionStatus
+  payment_status: PaymentStatus
+  payment_method: PaymentMethod
   base_minutes: number
   base_price_cop: number
   minutes_billed: number | null

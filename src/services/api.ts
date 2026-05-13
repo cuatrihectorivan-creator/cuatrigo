@@ -14,10 +14,10 @@ import type {
 const profileColumns = 'id,email,role,created_at,updated_at'
 const atvColumns = 'id,name,plate,active,color_hex,base_minutes,base_price_cop,created_at,updated_at'
 const sessionColumns =
-  'id,atv_id,started_by,started_at,target_end_at,paused_at,ended_at,status,minutes_billed,amount_cop,created_at,updated_at'
+  'id,atv_id,started_by,started_at,target_end_at,paused_at,ended_at,status,payment_status,payment_method,minutes_billed,amount_cop,created_at,updated_at'
 const brincaSettingsColumns = 'id,base_minutes,base_price_cop,created_at,updated_at'
 const brincaSessionColumns =
-  'id,child_name,started_by,started_at,target_end_at,paused_at,ended_at,status,base_minutes,base_price_cop,minutes_billed,amount_cop,created_at,updated_at'
+  'id,child_name,started_by,started_at,target_end_at,paused_at,ended_at,status,payment_status,payment_method,base_minutes,base_price_cop,minutes_billed,amount_cop,created_at,updated_at'
 const comboColumns =
   'id,child_name,start_mode,status,atv_id,moto_duration_minutes,brinca_duration_minutes,moto_session_id,brinca_session_id,moto_completed_at,brinca_completed_at,completed_at,started_by,created_at,updated_at'
 
@@ -140,8 +140,8 @@ export async function fetchRecentSessions(limit = 20): Promise<RideSession[]> {
   return (data ?? []) as RideSession[]
 }
 
-export async function startSession(atvId: string, durationMinutes: number): Promise<void> {
-  const { error } = await supabase.rpc('start_session', {
+export async function startSession(atvId: string, durationMinutes: number): Promise<string> {
+  const { data, error } = await supabase.rpc('start_session', {
     p_atv_id: atvId,
     p_duration_minutes: durationMinutes,
   })
@@ -149,11 +149,40 @@ export async function startSession(atvId: string, durationMinutes: number): Prom
   if (error) {
     throw error
   }
+
+  return String(data)
 }
 
 export async function stopSession(sessionId: string): Promise<void> {
   const { error } = await supabase.rpc('stop_session', {
     p_session_id: sessionId,
+  })
+
+  if (error) {
+    throw error
+  }
+}
+
+export async function cancelSession(sessionId: string, annulKey: string): Promise<void> {
+  const { error } = await supabase.rpc('cancel_session', {
+    p_session_id: sessionId,
+    p_annul_key: annulKey,
+  })
+
+  if (error) {
+    throw error
+  }
+}
+
+export async function setSessionPayment(
+  sessionId: string,
+  paymentStatus: 'pending' | 'paid',
+  paymentMethod: 'cash' | 'nequi' | null,
+): Promise<void> {
+  const { error } = await supabase.rpc('set_session_payment', {
+    p_session_id: sessionId,
+    p_payment_status: paymentStatus,
+    p_payment_method: paymentMethod,
   })
 
   if (error) {
@@ -218,6 +247,22 @@ export async function fetchCompletedSessionsByRange(startIso: string, endIso: st
     .from('sessions')
     .select(sessionColumns)
     .eq('status', 'completed')
+    .gte('ended_at', startIso)
+    .lt('ended_at', endIso)
+    .order('ended_at', { ascending: false, nullsFirst: false })
+
+  if (error) {
+    throw error
+  }
+
+  return (data ?? []) as RideSession[]
+}
+
+export async function fetchClosedSessionsByRange(startIso: string, endIso: string): Promise<RideSession[]> {
+  const { data, error } = await supabase
+    .from('sessions')
+    .select(sessionColumns)
+    .in('status', ['completed', 'cancelled'])
     .gte('ended_at', startIso)
     .lt('ended_at', endIso)
     .order('ended_at', { ascending: false, nullsFirst: false })
@@ -344,8 +389,27 @@ export async function fetchCompletedBrincaSessionsByRange(startIso: string, endI
   return (data ?? []) as BrincaSession[]
 }
 
-export async function startBrincaSession(input: { childName: string; durationMinutes: number }): Promise<void> {
-  const { error } = await supabase.rpc('start_brinca_session', {
+export async function fetchClosedBrincaSessionsByRange(startIso: string, endIso: string): Promise<BrincaSession[]> {
+  const { data, error } = await supabase
+    .from('brinca_sessions')
+    .select(brincaSessionColumns)
+    .in('status', ['completed', 'cancelled'])
+    .gte('ended_at', startIso)
+    .lt('ended_at', endIso)
+    .order('ended_at', { ascending: false, nullsFirst: false })
+
+  if (error) {
+    throw error
+  }
+
+  return (data ?? []) as BrincaSession[]
+}
+
+export async function startBrincaSession(input: {
+  childName: string
+  durationMinutes: number
+}): Promise<string> {
+  const { data, error } = await supabase.rpc('start_brinca_session', {
     p_child_name: input.childName,
     p_duration_minutes: input.durationMinutes,
   })
@@ -353,11 +417,40 @@ export async function startBrincaSession(input: { childName: string; durationMin
   if (error) {
     throw error
   }
+
+  return String(data)
 }
 
 export async function stopBrincaSession(sessionId: string): Promise<void> {
   const { error } = await supabase.rpc('stop_brinca_session', {
     p_session_id: sessionId,
+  })
+
+  if (error) {
+    throw error
+  }
+}
+
+export async function cancelBrincaSession(sessionId: string, annulKey: string): Promise<void> {
+  const { error } = await supabase.rpc('cancel_brinca_session', {
+    p_session_id: sessionId,
+    p_annul_key: annulKey,
+  })
+
+  if (error) {
+    throw error
+  }
+}
+
+export async function setBrincaPayment(
+  sessionId: string,
+  paymentStatus: 'pending' | 'paid',
+  paymentMethod: 'cash' | 'nequi' | null,
+): Promise<void> {
+  const { error } = await supabase.rpc('set_brinca_payment', {
+    p_session_id: sessionId,
+    p_payment_status: paymentStatus,
+    p_payment_method: paymentMethod,
   })
 
   if (error) {
@@ -467,9 +560,10 @@ export async function startComboBrincaLeg(comboId: string): Promise<string> {
   return String(data)
 }
 
-export async function cancelCombo(comboId: string): Promise<string> {
+export async function cancelCombo(comboId: string, annulKey: string): Promise<string> {
   const { data, error } = await supabase.rpc('cancel_combo', {
     p_combo_id: comboId,
+    p_annul_key: annulKey,
   })
 
   if (error) {

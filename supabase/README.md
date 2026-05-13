@@ -27,10 +27,19 @@ Aplica en orden:
 10. `supabase/migrations/0009_combo_discount_and_finance.sql`
 11. `supabase/migrations/0010_reset_finance_all_modules.sql`
 12. `supabase/migrations/0011_block_combo_extension_rpc.sql`
+13. `supabase/migrations/0012_annulment_key_and_cancel_rpc.sql`
+14. `supabase/migrations/0013_payment_status_and_method.sql`
 
 Puedes hacerlo desde SQL Editor o con Supabase CLI.
 
 Si usas SQL Editor, ejecuta el paso 3 y el paso 4 en corridas separadas.
+
+La migracion `0012` deja configurada una clave inicial de anulacion (`5784`) en hash.
+Si quieres rotarla despues, ejecuta como admin:
+
+```sql
+select public.set_annulment_key('NUEVA_CLAVE');
+```
 
 ## 4) Configurar Auth
 

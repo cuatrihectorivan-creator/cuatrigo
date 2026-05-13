@@ -8,8 +8,8 @@ import type {
 } from '../types/domain'
 
 interface ExportFinanceCsvInput {
-  monthKey: string
-  monthLabel: string
+  periodKey: string
+  periodLabel: string
   byAtv: FinanceByAtvRow[]
   total: FinanceTotalRow | null
   recentSessions: RideSession[]
@@ -45,7 +45,17 @@ function formatDateTime(value: string | null): string {
 }
 
 export function downloadFinanceCsv(input: ExportFinanceCsvInput): void {
-  const { monthKey, monthLabel, byAtv, total, recentSessions, brincaTotal, brincaRecentSessions, comboFinance, atvs } = input
+  const {
+    periodKey,
+    periodLabel,
+    byAtv,
+    total,
+    recentSessions,
+    brincaTotal,
+    brincaRecentSessions,
+    comboFinance,
+    atvs,
+  } = input
   const atvNameById = new Map(atvs.map((atv) => [atv.id, atv.name]))
   const generatedAt = new Intl.DateTimeFormat('es-CO', {
     dateStyle: 'short',
@@ -55,7 +65,7 @@ export function downloadFinanceCsv(input: ExportFinanceCsvInput): void {
   const rows: Array<Array<string | number | boolean | null | undefined>> = []
 
   rows.push(['Reporte financiero CuatriGo'])
-  rows.push(['Mes', monthLabel, monthKey])
+  rows.push(['Periodo', periodLabel, periodKey])
   rows.push(['Generado', generatedAt])
   rows.push([])
 
@@ -85,10 +95,10 @@ export function downloadFinanceCsv(input: ExportFinanceCsvInput): void {
   rows.push([comboFinance?.combo_count ?? 0, comboFinance?.session_count ?? 0, comboFinance?.amount_total_cop ?? 0])
 
   rows.push([])
-  rows.push(['Sesiones cerradas del mes'])
-  rows.push(['Moto', 'Inicio', 'Fin', 'Minutos', 'Valor COP', 'Estado'])
+  rows.push(['Sesiones cerradas del periodo'])
+  rows.push(['Moto', 'Inicio', 'Fin', 'Minutos', 'Valor COP', 'Estado', 'Estado pago', 'Medio pago'])
   if (recentSessions.length === 0) {
-    rows.push(['Sin sesiones cerradas en este mes', '', '', '', '', ''])
+    rows.push(['Sin sesiones cerradas en este periodo', '', '', '', '', '', '', ''])
   } else {
     for (const session of recentSessions) {
       rows.push([
@@ -98,15 +108,17 @@ export function downloadFinanceCsv(input: ExportFinanceCsvInput): void {
         session.minutes_billed ?? 0,
         session.amount_cop ?? 0,
         session.status,
+        session.payment_status,
+        session.payment_method ?? '',
       ])
     }
   }
 
   rows.push([])
-  rows.push(['Sesiones Brinca cerradas del mes'])
-  rows.push(['Nino', 'Inicio', 'Fin', 'Minutos', 'Valor COP', 'Estado'])
+  rows.push(['Sesiones Brinca cerradas del periodo'])
+  rows.push(['Nino', 'Inicio', 'Fin', 'Minutos', 'Valor COP', 'Estado', 'Estado pago', 'Medio pago'])
   if (brincaRecentSessions.length === 0) {
-    rows.push(['Sin sesiones Brinca cerradas en este mes', '', '', '', '', ''])
+    rows.push(['Sin sesiones Brinca cerradas en este periodo', '', '', '', '', '', '', ''])
   } else {
     for (const session of brincaRecentSessions) {
       rows.push([
@@ -116,6 +128,8 @@ export function downloadFinanceCsv(input: ExportFinanceCsvInput): void {
         session.minutes_billed ?? 0,
         session.amount_cop ?? 0,
         session.status,
+        session.payment_status,
+        session.payment_method ?? '',
       ])
     }
   }
@@ -125,7 +139,7 @@ export function downloadFinanceCsv(input: ExportFinanceCsvInput): void {
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
   anchor.href = url
-  anchor.download = `cuatrigo_finanzas_${monthKey.replace('-', '_')}.csv`
+  anchor.download = `cuatrigo_finanzas_${periodKey.replace(/[^a-zA-Z0-9_-]/g, '_')}.csv`
   document.body.appendChild(anchor)
   anchor.click()
   anchor.remove()

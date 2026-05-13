@@ -53,6 +53,8 @@ Revisa:
 - `supabase/migrations/0009_combo_discount_and_finance.sql`
 - `supabase/migrations/0010_reset_finance_all_modules.sql`
 - `supabase/migrations/0011_block_combo_extension_rpc.sql`
+- `supabase/migrations/0012_annulment_key_and_cancel_rpc.sql`
+- `supabase/migrations/0013_payment_status_and_method.sql`
 - `supabase/README.md`
 
 ## Deploy en Cloudflare Pages
