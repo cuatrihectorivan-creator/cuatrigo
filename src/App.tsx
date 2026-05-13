@@ -2848,7 +2848,7 @@ function AtvAdminTab(props: {
       </form>
 
       <div className="table-wrap">
-        <table>
+        <table className="responsive-table">
           <thead>
             <tr>
               <th>Moto</th>
@@ -2865,8 +2865,8 @@ function AtvAdminTab(props: {
               const effectiveColor = draft?.colorHex ?? atv.color_hex ?? '#3b82f6'
               return (
                 <tr key={atv.id}>
-                  <td>{atv.name}</td>
-                  <td>
+                  <td data-label="Moto">{atv.name}</td>
+                  <td data-label="Color">
                     <div className="color-editor">
                       <span className="color-preview-square" style={{ backgroundColor: effectiveColor }} aria-hidden="true" />
                       <input
@@ -2888,7 +2888,7 @@ function AtvAdminTab(props: {
                       />
                     </div>
                   </td>
-                  <td>
+                  <td data-label="Base min">
                     <input
                       type="number"
                       min={1}
@@ -2907,7 +2907,7 @@ function AtvAdminTab(props: {
                       }}
                     />
                   </td>
-                  <td>
+                  <td data-label="Base COP">
                     <input
                       type="number"
                       min={10000}
@@ -2926,12 +2926,12 @@ function AtvAdminTab(props: {
                       }}
                     />
                   </td>
-                  <td>
+                  <td data-label="Estado">
                     <span className={`badge ${atv.active ? 'ok' : 'inactive'}`}>
                       {atv.active ? 'Activa' : 'Inactiva'}
                     </span>
                   </td>
-                  <td>
+                  <td data-label="Acciones">
                     <div className="button-row compact">
                       <button type="button" className="secondary" disabled={!canEdit} onClick={() => void handleRateSave(atv.id)}>
                         Guardar
@@ -3261,7 +3261,7 @@ function FinanceTab(props: {
       </section>
 
       <div className="table-wrap">
-        <table>
+        <table className="responsive-table">
           <thead>
             <tr>
               <th>Cuatrimoto</th>
@@ -3273,10 +3273,10 @@ function FinanceTab(props: {
           <tbody>
             {byAtv.map((row) => (
               <tr key={row.atv_id}>
-                <td>{row.atv_name}</td>
-                <td>{row.session_count}</td>
-                <td>{row.minutes_total}</td>
-                <td>{formatCurrencyCop(row.amount_total_cop)}</td>
+                <td data-label="Cuatrimoto">{row.atv_name}</td>
+                <td data-label="Sesiones">{row.session_count}</td>
+                <td data-label="Minutos">{row.minutes_total}</td>
+                <td data-label="Total COP">{formatCurrencyCop(row.amount_total_cop)}</td>
               </tr>
             ))}
           </tbody>
@@ -3285,7 +3285,7 @@ function FinanceTab(props: {
 
       <h3>Ultimas sesiones cerradas</h3>
       <div className="table-wrap">
-        <table>
+        <table className="responsive-table">
           <thead>
             <tr>
               <th>ID</th>
@@ -3311,18 +3311,18 @@ function FinanceTab(props: {
                 const isCancelled = session.status === 'cancelled'
                 return (
                   <tr key={session.id}>
-                    <td>{shortTransactionId(session.id)}</td>
-                    <td>{getAtvName(session.atv_id)}</td>
-                    <td>{formatDateTime(session.started_at)}</td>
-                    <td>{formatDateTime(session.ended_at)}</td>
-                    <td>{session.minutes_billed ?? 0}</td>
-                    <td>{formatCurrencyCop(session.amount_cop ?? 0)}</td>
-                    <td>
+                    <td data-label="ID">{shortTransactionId(session.id)}</td>
+                    <td data-label="Moto">{getAtvName(session.atv_id)}</td>
+                    <td data-label="Inicio">{formatDateTime(session.started_at)}</td>
+                    <td data-label="Fin">{formatDateTime(session.ended_at)}</td>
+                    <td data-label="Minutos">{session.minutes_billed ?? 0}</td>
+                    <td data-label="Valor">{formatCurrencyCop(session.amount_cop ?? 0)}</td>
+                    <td data-label="Estado">
                       <span className={`badge ${isCancelled ? 'inactive' : 'finished'}`}>
                         {closedStatusLabel(session.status)}
                       </span>
                     </td>
-                    <td>
+                    <td data-label="Estado pago">
                       <select
                         value={draft.status}
                         disabled={isCancelled}
@@ -3341,7 +3341,7 @@ function FinanceTab(props: {
                         <option value="paid">Pagado</option>
                       </select>
                     </td>
-                    <td>
+                    <td data-label="Medio">
                       <select
                         value={draft.method ?? ''}
                         disabled={isCancelled || draft.status !== 'paid'}
@@ -3361,7 +3361,7 @@ function FinanceTab(props: {
                         <option value="nequi">Nequi</option>
                       </select>
                     </td>
-                    <td>
+                    <td data-label="Accion">
                       {isCancelled ? (
                         <span className="muted">No aplica</span>
                       ) : (
@@ -3385,7 +3385,7 @@ function FinanceTab(props: {
 
       <h3>Ultimas sesiones Brinca cerradas</h3>
       <div className="table-wrap">
-        <table>
+        <table className="responsive-table">
           <thead>
             <tr>
               <th>ID</th>
@@ -3411,18 +3411,18 @@ function FinanceTab(props: {
                 const isCancelled = session.status === 'cancelled'
                 return (
                   <tr key={session.id}>
-                    <td>{shortTransactionId(session.id)}</td>
-                    <td>{session.child_name}</td>
-                    <td>{formatDateTime(session.started_at)}</td>
-                    <td>{formatDateTime(session.ended_at)}</td>
-                    <td>{session.minutes_billed ?? 0}</td>
-                    <td>{formatCurrencyCop(session.amount_cop ?? 0)}</td>
-                    <td>
+                    <td data-label="ID">{shortTransactionId(session.id)}</td>
+                    <td data-label="Nino">{session.child_name}</td>
+                    <td data-label="Inicio">{formatDateTime(session.started_at)}</td>
+                    <td data-label="Fin">{formatDateTime(session.ended_at)}</td>
+                    <td data-label="Minutos">{session.minutes_billed ?? 0}</td>
+                    <td data-label="Valor">{formatCurrencyCop(session.amount_cop ?? 0)}</td>
+                    <td data-label="Estado">
                       <span className={`badge ${isCancelled ? 'inactive' : 'finished'}`}>
                         {closedStatusLabel(session.status)}
                       </span>
                     </td>
-                    <td>
+                    <td data-label="Estado pago">
                       <select
                         value={draft.status}
                         disabled={isCancelled}
@@ -3441,7 +3441,7 @@ function FinanceTab(props: {
                         <option value="paid">Pagado</option>
                       </select>
                     </td>
-                    <td>
+                    <td data-label="Medio">
                       <select
                         value={draft.method ?? ''}
                         disabled={isCancelled || draft.status !== 'paid'}
@@ -3461,7 +3461,7 @@ function FinanceTab(props: {
                         <option value="nequi">Nequi</option>
                       </select>
                     </td>
-                    <td>
+                    <td data-label="Accion">
                       {isCancelled ? (
                         <span className="muted">No aplica</span>
                       ) : (

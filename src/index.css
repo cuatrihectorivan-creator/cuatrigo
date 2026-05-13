@@ -82,6 +82,7 @@ button,
 input,
 select {
   font: inherit;
+  -webkit-tap-highlight-color: transparent;
 }
 
 button {
@@ -98,6 +99,7 @@ button {
     opacity 160ms ease;
   background: linear-gradient(120deg, var(--accent) 0%, #326bff 45%, #2482ff 100%);
   box-shadow: 0 10px 24px rgba(63, 140, 255, 0.35);
+  min-height: 44px;
 }
 
 button:hover {
@@ -139,6 +141,7 @@ input {
   padding: 0.62rem 0.7rem;
   background: rgba(8, 14, 36, 0.72);
   outline: none;
+  min-height: 44px;
 }
 
 select {
@@ -149,6 +152,7 @@ select {
   padding: 0.62rem 0.7rem;
   background: rgba(8, 14, 36, 0.72);
   outline: none;
+  min-height: 44px;
 }
 
 input[type='color'] {
@@ -283,7 +287,7 @@ thead th {
   position: relative;
   z-index: 1;
   width: min(1180px, calc(100% - 2rem));
-  margin: 1rem auto 2rem;
+  margin: 1rem auto calc(2rem + env(safe-area-inset-bottom));
   display: grid;
   gap: 1rem;
   animation: app-reveal 360ms ease;
@@ -640,6 +644,7 @@ thead th {
 
 .table-wrap {
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
   border: 1px solid rgba(98, 135, 214, 0.28);
   border-radius: 12px;
 }
@@ -693,7 +698,7 @@ thead th {
 .toast {
   position: fixed;
   right: 1rem;
-  bottom: 1rem;
+  bottom: calc(1rem + env(safe-area-inset-bottom));
   max-width: min(430px, calc(100vw - 2rem));
   border-radius: 10px;
   padding: 0.72rem 0.92rem;
@@ -720,6 +725,11 @@ thead th {
 
   .topbar {
     flex-direction: column;
+  }
+
+  .topbar-actions {
+    width: 100%;
+    flex-wrap: wrap;
   }
 
   .summary-grid {
@@ -752,10 +762,15 @@ thead th {
 
   .tabs {
     width: 100%;
+    overflow-x: auto;
+    white-space: nowrap;
+    padding-bottom: 0.35rem;
+    scrollbar-width: thin;
   }
 
   .tabs button {
-    flex: 1;
+    flex: 0 0 auto;
+    min-width: 128px;
   }
 
   .inline-form {
@@ -772,10 +787,12 @@ thead th {
 
   .topbar-actions {
     width: 100%;
+    display: grid;
+    grid-template-columns: 1fr;
   }
 
   .topbar-actions button {
-    flex: 1;
+    width: 100%;
   }
 
   .finance-controls {
@@ -783,8 +800,75 @@ thead th {
     align-items: stretch;
   }
 
+  .button-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    width: 100%;
+  }
+
+  .button-row > * {
+    width: 100%;
+  }
+
+  .button-row.compact {
+    grid-template-columns: 1fr;
+  }
+
   .atv-image-wrap {
     width: min(100%, 240px);
+  }
+}
+
+@media (max-width: 760px) {
+  table.responsive-table thead {
+    display: none;
+  }
+
+  table.responsive-table tbody,
+  table.responsive-table tr,
+  table.responsive-table td {
+    display: block;
+    width: 100%;
+  }
+
+  table.responsive-table tr {
+    padding: 0.55rem 0.25rem;
+    border-bottom: 1px solid rgba(127, 163, 248, 0.2);
+  }
+
+  table.responsive-table tr:last-child {
+    border-bottom: none;
+  }
+
+  table.responsive-table td {
+    border-bottom: none;
+    padding: 0.44rem 0.45rem;
+    display: grid;
+    grid-template-columns: minmax(105px, 38%) 1fr;
+    gap: 0.56rem;
+    align-items: center;
+  }
+
+  table.responsive-table td::before {
+    content: attr(data-label);
+    color: #afc3e9;
+    font-weight: 600;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+
+  table.responsive-table td[colspan] {
+    display: block;
+    padding: 0.75rem 0.45rem;
+  }
+
+  table.responsive-table td[colspan]::before {
+    content: none;
+  }
+
+  table.responsive-table td .button-row {
+    grid-template-columns: 1fr;
   }
 }
 
