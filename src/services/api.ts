@@ -4,6 +4,7 @@ import type {
   BrincaSession,
   BrincaSettings,
   Combo,
+  ComboFinanceRow,
   ComboFinanceSummary,
   FinanceByAtvRow,
   FinanceTotalRow,
@@ -573,6 +574,24 @@ export async function cancelCombo(comboId: string, annulKey: string): Promise<st
   return String(data)
 }
 
+export async function setComboPayment(
+  comboId: string,
+  paymentStatus: 'pending' | 'paid',
+  paymentMethod: 'cash' | 'nequi' | null,
+): Promise<string> {
+  const { data, error } = await supabase.rpc('set_combo_payment', {
+    p_combo_id: comboId,
+    p_payment_status: paymentStatus,
+    p_payment_method: paymentMethod,
+  })
+
+  if (error) {
+    throw error
+  }
+
+  return String(data)
+}
+
 export function computeBrincaFinance(completedSessions: BrincaSession[]): FinanceTotalRow {
   let totalSessions = 0
   let totalMinutes = 0
@@ -646,4 +665,56 @@ export function computeComboFinance(
     minutes_total: minutesTotal,
     amount_total_cop: amountTotal,
   }
+}
+
+export function computeComboFinanceRows(
+  combos: Combo[],
+  motoSessions: RideSession[],
+  brincaSessions: BrincaSession[],
+): ComboFinanceRow[] {
+  const motoById = new Map(motoSessions.map((session) => [session.id, session]))
+  const brincaById = new Map(brincaSessions.map((session) => [session.id, session]))
+  const rows: ComboFinanceRow[] = []
+
+  for (const combo of combos) {
+    if (combo.status === 'cancelled') {
+      continue
+    }
+
+    const moto = combo.moto_session_id ? motoById.get(combo.moto_session_id) : undefined
+    const brinca = combo.brinca_session_id ? brincaById.get(combo.brinca_session_id) : undefined
+
+    if (!moto && !brinca) {
+      continue
+    }
+
+    const motoAmount = moto?.amount_cop ?? 0
+    const brincaAmount = brinca?.amount_cop ?? 0
+    const motoStatus = moto?.payment_status ?? 'pending'
+    const brincaStatus = brinca?.payment_status ?? 'pending'
+    const comboStatus: 'pending' | 'paid' = motoStatus === 'paid' && brincaStatus === 'paid' ? 'paid' : 'pending'
+    const comboMethod =
+      comboStatus === 'paid' && moto?.payment_method && brinca?.payment_method && moto.payment_method === brinca.payment_method
+        ? moto.payment_method
+        : comboStatus === 'paid'
+          ? moto?.payment_method ?? brinca?.payment_method ?? null
+          : null
+
+    rows.push({
+      combo_id: combo.id,
+      child_name: combo.child_name,
+      moto_session_id: combo.moto_session_id,
+      brinca_session_id: combo.brinca_session_id,
+      moto_amount_cop: motoAmount,
+      brinca_amount_cop: brincaAmount,
+      amount_total_cop: motoAmount + brincaAmount,
+      moto_payment_status: motoStatus,
+      brinca_payment_status: brincaStatus,
+      combo_payment_status: comboStatus,
+      combo_payment_method: comboMethod,
+    })
+  }
+
+  rows.sort((a, b) => b.amount_total_cop - a.amount_total_cop)
+  return rows
 }

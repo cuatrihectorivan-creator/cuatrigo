@@ -1,6 +1,7 @@
 import type {
   Atv,
   BrincaSession,
+  ComboFinanceRow,
   ComboFinanceSummary,
   FinanceByAtvRow,
   FinanceTotalRow,
@@ -16,6 +17,7 @@ interface ExportFinanceCsvInput {
   brincaTotal: FinanceTotalRow | null
   brincaRecentSessions: BrincaSession[]
   comboFinance: ComboFinanceSummary | null
+  comboFinanceRows: ComboFinanceRow[]
   atvs: Atv[]
 }
 
@@ -54,6 +56,7 @@ export function downloadFinanceCsv(input: ExportFinanceCsvInput): void {
     brincaTotal,
     brincaRecentSessions,
     comboFinance,
+    comboFinanceRows,
     atvs,
   } = input
   const atvNameById = new Map(atvs.map((atv) => [atv.id, atv.name]))
@@ -93,6 +96,25 @@ export function downloadFinanceCsv(input: ExportFinanceCsvInput): void {
   rows.push(['Resumen Combos'])
   rows.push(['Combos cobrados', 'Sesiones de combo', 'Total COP'])
   rows.push([comboFinance?.combo_count ?? 0, comboFinance?.session_count ?? 0, comboFinance?.amount_total_cop ?? 0])
+
+  rows.push([])
+  rows.push(['Detalle combos del periodo'])
+  rows.push(['ID combo', 'Nino', 'Moto COP', 'Brinca COP', 'Total COP', 'Pago combo', 'Medio'])
+  if (comboFinanceRows.length === 0) {
+    rows.push(['Sin combos en este periodo', '', '', '', '', '', ''])
+  } else {
+    for (const row of comboFinanceRows) {
+      rows.push([
+        row.combo_id,
+        row.child_name,
+        row.moto_amount_cop,
+        row.brinca_amount_cop,
+        row.amount_total_cop,
+        row.combo_payment_status,
+        row.combo_payment_method ?? '',
+      ])
+    }
+  }
 
   rows.push([])
   rows.push(['Sesiones cerradas del periodo'])

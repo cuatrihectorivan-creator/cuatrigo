@@ -6,6 +6,7 @@ import {
   cancelCombo,
   cancelSession,
   computeComboFinance,
+  computeComboFinanceRows,
   computeBrincaFinance,
   computeFinance,
   createCombo,
@@ -33,6 +34,7 @@ import {
   restartSession,
   resumeSession,
   setBrincaPayment,
+  setComboPayment,
   setSessionPayment,
   startComboBrincaLeg,
   startComboMotoLeg,
@@ -59,6 +61,7 @@ import type {
   BrincaSession,
   BrincaSettings,
   Combo,
+  ComboFinanceRow,
   ComboFinanceSummary,
   ComboStartMode,
   FinanceByAtvRow,
@@ -445,6 +448,7 @@ function App(): ReactElement {
   const [brincaRecentSessions, setBrincaRecentSessions] = useState<BrincaSession[]>([])
   const [brincaFinanceTotal, setBrincaFinanceTotal] = useState<FinanceTotalRow | null>(null)
   const [comboFinanceTotal, setComboFinanceTotal] = useState<ComboFinanceSummary | null>(null)
+  const [comboFinanceRows, setComboFinanceRows] = useState<ComboFinanceRow[]>([])
   const [combos, setCombos] = useState<Combo[]>([])
   const [recentSessions, setRecentSessions] = useState<RideSession[]>([])
   const [financeByAtv, setFinanceByAtv] = useState<FinanceByAtvRow[]>([])
@@ -595,6 +599,7 @@ function App(): ReactElement {
     setBrincaRecentSessions([])
     setBrincaFinanceTotal(null)
     setComboFinanceTotal(null)
+    setComboFinanceRows([])
     setCombos([])
     setRecentSessions([])
     setFinanceByAtv([])
@@ -639,6 +644,7 @@ function App(): ReactElement {
       const { byAtv, total } = computeFinance(nextAtvs, completedSessions)
       const brincaTotal = computeBrincaFinance(nextBrincaCompletedSessions)
       const comboTotal = computeComboFinance(nextCombos, completedSessions, nextBrincaCompletedSessions)
+      const comboRows = computeComboFinanceRows(nextCombos, closedSessionsByRange, nextBrincaClosedSessions)
       const nextLastClosedByAtv: Record<string, RideSession> = {}
       for (const session of closedSessionsRecent) {
         if (session.status !== 'completed') {
@@ -661,6 +667,7 @@ function App(): ReactElement {
       setBrincaRecentSessions(nextBrincaClosedSessions.slice(0, 120))
       setBrincaFinanceTotal(brincaTotal)
       setComboFinanceTotal(comboTotal)
+      setComboFinanceRows(comboRows)
       setCombos(nextCombos)
       setRecentSessions(closedSessionsByRange.slice(0, 120))
       setFinanceByAtv(byAtv)
@@ -1148,6 +1155,15 @@ function App(): ReactElement {
     [loadData, notify],
   )
 
+  const handleSetComboPayment = useCallback(
+    async (comboId: string, paymentStatus: PaymentStatus, paymentMethod: PaymentMethod) => {
+      await setComboPayment(comboId, paymentStatus, paymentMethod)
+      notify('success', 'Pago de combo actualizado')
+      await loadData()
+    },
+    [loadData, notify],
+  )
+
   const handleCancelCombo = useCallback(
     async (comboId: string, annulKey: string) => {
       await cancelCombo(comboId, annulKey)
@@ -1184,6 +1200,7 @@ function App(): ReactElement {
       brincaTotal: brincaFinanceTotal,
       brincaRecentSessions,
       comboFinance: comboFinanceTotal,
+      comboFinanceRows,
       atvs,
     })
     notify('success', `Reporte CSV descargado (${financeRange.label}).`)
@@ -1192,6 +1209,7 @@ function App(): ReactElement {
     brincaFinanceTotal,
     brincaRecentSessions,
     comboFinanceTotal,
+    comboFinanceRows,
     financeRange.fileSuffix,
     financeRange.label,
     financeByAtv,
@@ -1341,11 +1359,13 @@ function App(): ReactElement {
           openSessionByAtv={openSessionByAtv}
           openMotoSessionById={openMotoSessionById}
           openBrincaSessionById={openBrincaSessionById}
+          comboFinanceRows={comboFinanceRows}
           brincaSettings={brincaSettings}
           tickMs={tickMs}
           onCreateCombo={handleCreateCombo}
           onStartMotoLeg={handleStartComboMotoLeg}
           onStartBrincaLeg={handleStartComboBrincaLeg}
+          onSetComboPayment={handleSetComboPayment}
           onCancelCombo={handleCancelCombo}
           onError={(message) => notify('error', message)}
         />
@@ -1359,6 +1379,7 @@ function App(): ReactElement {
           brincaTotal={brincaFinanceTotal}
           brincaRecentSessions={brincaRecentSessions}
           comboFinance={comboFinanceTotal}
+          comboFinanceRows={comboFinanceRows}
           atvs={atvs}
           canReset={isAdmin}
           rangeMode={financeRangeMode}
@@ -2322,6 +2343,7 @@ function CombosTab(props: {
   openSessionByAtv: Map<string, RideSession>
   openMotoSessionById: Map<string, RideSession>
   openBrincaSessionById: Map<string, BrincaSession>
+  comboFinanceRows: ComboFinanceRow[]
   brincaSettings: BrincaSettings | null
   tickMs: number
   onCreateCombo: (input: {
@@ -2333,6 +2355,7 @@ function CombosTab(props: {
   }) => Promise<void>
   onStartMotoLeg: (comboId: string, atvId?: string | null) => Promise<void>
   onStartBrincaLeg: (comboId: string) => Promise<void>
+  onSetComboPayment: (comboId: string, paymentStatus: PaymentStatus, paymentMethod: PaymentMethod) => Promise<void>
   onCancelCombo: (comboId: string, annulKey: string) => Promise<void>
   onError: (message: string) => void
 }): ReactElement {
@@ -2342,11 +2365,13 @@ function CombosTab(props: {
     openSessionByAtv,
     openMotoSessionById,
     openBrincaSessionById,
+    comboFinanceRows,
     brincaSettings,
     tickMs,
     onCreateCombo,
     onStartMotoLeg,
     onStartBrincaLeg,
+    onSetComboPayment,
     onCancelCombo,
     onError,
   } = props
@@ -2359,12 +2384,17 @@ function CombosTab(props: {
   const [creating, setCreating] = useState(false)
   const [busyComboId, setBusyComboId] = useState<string | null>(null)
   const [atvDraftByCombo, setAtvDraftByCombo] = useState<Record<string, string>>({})
+  const [comboPaymentDraftById, setComboPaymentDraftById] = useState<
+    Record<string, { status: PaymentStatus; method: PaymentMethod }>
+  >({})
+  const [savingComboPaymentId, setSavingComboPaymentId] = useState<string | null>(null)
 
   const availableAtvs = useMemo(() => {
     return atvs.filter((atv) => atv.active && !openSessionByAtv.has(atv.id))
   }, [atvs, openSessionByAtv])
 
   const availableAtvIds = useMemo(() => new Set(availableAtvs.map((atv) => atv.id)), [availableAtvs])
+  const comboRowById = useMemo(() => new Map(comboFinanceRows.map((row) => [row.combo_id, row])), [comboFinanceRows])
   const visibleCombos = useMemo(() => {
     return combos.filter((combo) => {
       if (combo.status !== 'completed' && combo.status !== 'cancelled') {
@@ -2419,6 +2449,31 @@ function CombosTab(props: {
       return 'Brinca primero'
     }
     return 'Cualquiera primero'
+  }
+
+  function getComboPaymentDraft(
+    comboId: string,
+    fallbackStatus: PaymentStatus,
+    fallbackMethod: PaymentMethod,
+  ): { status: PaymentStatus; method: PaymentMethod } {
+    return comboPaymentDraftById[comboId] ?? { status: fallbackStatus, method: fallbackMethod }
+  }
+
+  async function handleSaveComboPayment(comboId: string, status: PaymentStatus, method: PaymentMethod): Promise<void> {
+    const normalizedMethod = status === 'paid' ? method : null
+    if (status === 'paid' && !normalizedMethod) {
+      onError('Para marcar combo como pagado debes elegir Efectivo o Nequi.')
+      return
+    }
+
+    setSavingComboPaymentId(comboId)
+    try {
+      await onSetComboPayment(comboId, status, normalizedMethod)
+    } catch (error) {
+      onError(getErrorMessage(error))
+    } finally {
+      setSavingComboPaymentId(null)
+    }
   }
 
   async function handleCreateCombo(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -2503,6 +2558,7 @@ function CombosTab(props: {
           Crea combos para un nino (Moto + Brinca), elige que inicia primero y dispara cada parte cuando toque.
         </p>
         <p className="muted">Tarifa combo: Moto 10 min = 8000 COP, Brinca 15 min = 5000 COP.</p>
+        <p className="muted">Pago combo unificado: al marcar pagado/pending se sincronizan Moto y Brinca.</p>
         <p className="muted">Los combos completados o cancelados se ocultan automaticamente despues de 5 minutos.</p>
       </header>
 
@@ -2566,6 +2622,7 @@ function CombosTab(props: {
         ) : (
           visibleCombos.map((combo) => {
             const statusBadge = comboStatusBadge(combo.status)
+            const comboRow = comboRowById.get(combo.id)
             const motoOpen = combo.moto_session_id ? openMotoSessionById.get(combo.moto_session_id) : undefined
             const brincaOpen = combo.brinca_session_id ? openBrincaSessionById.get(combo.brinca_session_id) : undefined
             const motoOpenStatus = motoOpen ? (motoOpen.status === 'paused' ? 'paused' : 'active') : null
@@ -2575,6 +2632,19 @@ function CombosTab(props: {
             const motoRemaining = motoOpen ? getRemainingMs(motoOpen.target_end_at, tickMs) : null
             const brincaRemaining = brincaOpen ? getRemainingMs(brincaOpen.target_end_at, tickMs) : null
             const comboAtvValue = atvDraftByCombo[combo.id] ?? combo.atv_id ?? ''
+            const motoPaymentStatus = motoOpen?.payment_status ?? comboRow?.moto_payment_status ?? 'pending'
+            const brincaPaymentStatus = brincaOpen?.payment_status ?? comboRow?.brinca_payment_status ?? 'pending'
+            const comboPaymentStatus: PaymentStatus =
+              motoPaymentStatus === 'paid' && brincaPaymentStatus === 'paid' ? 'paid' : 'pending'
+            const comboPaymentMethod: PaymentMethod =
+              comboPaymentStatus === 'paid'
+                ? motoOpen?.payment_method ??
+                  brincaOpen?.payment_method ??
+                  comboRow?.combo_payment_method ??
+                  null
+                : null
+            const paymentDraft = getComboPaymentDraft(combo.id, comboPaymentStatus, comboPaymentMethod)
+            const canEditComboPayment = combo.status !== 'cancelled' && (Boolean(combo.moto_session_id) || Boolean(combo.brinca_session_id))
 
             return (
               <article key={combo.id} className="atv-card combo-card">
@@ -2590,6 +2660,63 @@ function CombosTab(props: {
                   Moto asignada:{' '}
                   {combo.atv_id ? atvs.find((atv) => atv.id === combo.atv_id)?.name ?? 'Moto no encontrada' : 'Sin seleccionar'}
                 </p>
+                <p className="meta">
+                  Pago combo: {paymentStatusLabel(comboPaymentStatus)} | Medio: {paymentMethodLabel(comboPaymentMethod)}
+                </p>
+
+                {canEditComboPayment ? (
+                  <div className="button-row">
+                    <label>
+                      Estado pago combo
+                      <select
+                        value={paymentDraft.status}
+                        disabled={savingComboPaymentId === combo.id}
+                        onChange={(event) => {
+                          const status = event.target.value as PaymentStatus
+                          setComboPaymentDraftById((current) => ({
+                            ...current,
+                            [combo.id]: {
+                              status,
+                              method: status === 'pending' ? null : current[combo.id]?.method ?? comboPaymentMethod ?? 'cash',
+                            },
+                          }))
+                        }}
+                      >
+                        <option value="pending">Pendiente</option>
+                        <option value="paid">Pagado</option>
+                      </select>
+                    </label>
+                    <label>
+                      Medio pago combo
+                      <select
+                        value={paymentDraft.method ?? ''}
+                        disabled={paymentDraft.status !== 'paid' || savingComboPaymentId === combo.id}
+                        onChange={(event) => {
+                          const value = event.target.value as 'cash' | 'nequi' | ''
+                          setComboPaymentDraftById((current) => ({
+                            ...current,
+                            [combo.id]: {
+                              status: paymentDraft.status,
+                              method: value ? value : null,
+                            },
+                          }))
+                        }}
+                      >
+                        <option value="">Seleccionar</option>
+                        <option value="cash">Efectivo</option>
+                        <option value="nequi">Nequi</option>
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={savingComboPaymentId === combo.id || (paymentDraft.status === 'paid' && !paymentDraft.method)}
+                      onClick={() => void handleSaveComboPayment(combo.id, paymentDraft.status, paymentDraft.method)}
+                    >
+                      {savingComboPaymentId === combo.id ? 'Guardando...' : 'Guardar pago combo'}
+                    </button>
+                  </div>
+                ) : null}
 
                 <section className="combo-leg">
                   <div className="combo-leg-row">
@@ -2966,6 +3093,7 @@ function FinanceTab(props: {
   brincaTotal: FinanceTotalRow | null
   brincaRecentSessions: BrincaSession[]
   comboFinance: ComboFinanceSummary | null
+  comboFinanceRows: ComboFinanceRow[]
   atvs: Atv[]
   canReset: boolean
   rangeMode: FinanceRangeMode
@@ -2995,6 +3123,7 @@ function FinanceTab(props: {
     brincaTotal,
     brincaRecentSessions,
     comboFinance,
+    comboFinanceRows,
     atvs,
     canReset,
     rangeMode,
@@ -3244,6 +3373,42 @@ function FinanceTab(props: {
           <strong>{formatCurrencyCop(comboFinance?.amount_total_cop ?? 0)}</strong>
         </article>
       </section>
+
+      <h3>Detalle de combos del periodo</h3>
+      <div className="table-wrap">
+        <table className="responsive-table">
+          <thead>
+            <tr>
+              <th>ID Combo</th>
+              <th>Nino</th>
+              <th>Moto COP</th>
+              <th>Brinca COP</th>
+              <th>Total COP</th>
+              <th>Pago combo</th>
+              <th>Medio</th>
+            </tr>
+          </thead>
+          <tbody>
+            {comboFinanceRows.length === 0 ? (
+              <tr>
+                <td colSpan={7}>No hay combos con ingresos en este periodo.</td>
+              </tr>
+            ) : (
+              comboFinanceRows.map((row) => (
+                <tr key={row.combo_id}>
+                  <td data-label="ID Combo">{shortTransactionId(row.combo_id)}</td>
+                  <td data-label="Nino">{row.child_name}</td>
+                  <td data-label="Moto COP">{formatCurrencyCop(row.moto_amount_cop)}</td>
+                  <td data-label="Brinca COP">{formatCurrencyCop(row.brinca_amount_cop)}</td>
+                  <td data-label="Total COP">{formatCurrencyCop(row.amount_total_cop)}</td>
+                  <td data-label="Pago combo">{paymentStatusLabel(row.combo_payment_status)}</td>
+                  <td data-label="Medio">{paymentMethodLabel(row.combo_payment_method)}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
 
       <section className="summary-grid finance finance-block">
         <article className="summary-card">

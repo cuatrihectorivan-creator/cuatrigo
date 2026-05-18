@@ -63,6 +63,20 @@ export interface ComboFinanceSummary {
   amount_total_cop: number
 }
 
+export interface ComboFinanceRow {
+  combo_id: string
+  child_name: string
+  moto_session_id: string | null
+  brinca_session_id: string | null
+  moto_amount_cop: number
+  brinca_amount_cop: number
+  amount_total_cop: number
+  moto_payment_status: PaymentStatus
+  brinca_payment_status: PaymentStatus
+  combo_payment_status: PaymentStatus
+  combo_payment_method: PaymentMethod
+}
+
 export interface BrincaSettings {
   id: boolean
   base_minutes: number

@@ -55,6 +55,8 @@ Revisa:
 - `supabase/migrations/0011_block_combo_extension_rpc.sql`
 - `supabase/migrations/0012_annulment_key_and_cancel_rpc.sql`
 - `supabase/migrations/0013_payment_status_and_method.sql`
+- `supabase/migrations/0014_hard_cap_stop_and_self_heal_start.sql`
+- `supabase/migrations/0015_combo_payment_sync.sql`
 - `supabase/README.md`
 
 ## Deploy en Cloudflare Pages

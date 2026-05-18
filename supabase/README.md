@@ -29,6 +29,8 @@ Aplica en orden:
 12. `supabase/migrations/0011_block_combo_extension_rpc.sql`
 13. `supabase/migrations/0012_annulment_key_and_cancel_rpc.sql`
 14. `supabase/migrations/0013_payment_status_and_method.sql`
+15. `supabase/migrations/0014_hard_cap_stop_and_self_heal_start.sql`
+16. `supabase/migrations/0015_combo_payment_sync.sql`
 
 Puedes hacerlo desde SQL Editor o con Supabase CLI.
 
