@@ -1,3 +1,4 @@
+import * as XLSX from 'xlsx'
 import type {
   Atv,
   BrincaSession,
@@ -8,7 +9,7 @@ import type {
   RideSession,
 } from '../types/domain'
 
-interface ExportFinanceCsvInput {
+interface ExportFinanceExcelInput {
   periodKey: string
   periodLabel: string
   byAtv: FinanceByAtvRow[]
@@ -19,20 +20,6 @@ interface ExportFinanceCsvInput {
   comboFinance: ComboFinanceSummary | null
   comboFinanceRows: ComboFinanceRow[]
   atvs: Atv[]
-}
-
-function escapeCsvValue(value: string | number | boolean | null | undefined): string {
-  const raw = value == null ? '' : String(value)
-
-  if (/[",\r\n]/.test(raw)) {
-    return `"${raw.replace(/"/g, '""')}"`
-  }
-
-  return raw
-}
-
-function toCsv(rows: Array<Array<string | number | boolean | null | undefined>>): string {
-  return rows.map((row) => row.map((cell) => escapeCsvValue(cell)).join(',')).join('\r\n')
 }
 
 function formatDateTime(value: string | null): string {
@@ -46,7 +33,7 @@ function formatDateTime(value: string | null): string {
   }).format(new Date(value))
 }
 
-export function downloadFinanceCsv(input: ExportFinanceCsvInput): void {
+export function downloadFinanceExcel(input: ExportFinanceExcelInput): void {
   const {
     periodKey,
     periodLabel,
@@ -59,6 +46,7 @@ export function downloadFinanceCsv(input: ExportFinanceCsvInput): void {
     comboFinanceRows,
     atvs,
   } = input
+
   const atvNameById = new Map(atvs.map((atv) => [atv.id, atv.name]))
   const generatedAt = new Intl.DateTimeFormat('es-CO', {
     dateStyle: 'short',
@@ -156,12 +144,18 @@ export function downloadFinanceCsv(input: ExportFinanceCsvInput): void {
     }
   }
 
-  const csv = toCsv(rows)
-  const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' })
+  const worksheet = XLSX.utils.aoa_to_sheet(rows.map((row) => row.map((cell) => (cell == null ? '' : cell))))
+  const workbook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Finanzas')
+
+  const excelData = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' })
+  const blob = new Blob([excelData], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  })
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
   anchor.href = url
-  anchor.download = `cuatrigo_finanzas_${periodKey.replace(/[^a-zA-Z0-9_-]/g, '_')}.csv`
+  anchor.download = `cuatrigo_finanzas_${periodKey.replace(/[^a-zA-Z0-9_-]/g, '_')}.xlsx`
   document.body.appendChild(anchor)
   anchor.click()
   anchor.remove()

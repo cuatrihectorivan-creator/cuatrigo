@@ -29,7 +29,6 @@ import {
   pauseSession,
   refreshExpiredBrincaSessions,
   refreshExpiredSessions,
-  resetFinanceData,
   resumeBrincaSession,
   restartSession,
   resumeSession,
@@ -54,7 +53,7 @@ import {
   formatTimeAgo,
   getRemainingMs,
 } from './lib/format'
-import { downloadFinanceCsv } from './lib/exportFinanceCsv'
+import { downloadFinanceExcel } from './lib/exportFinanceExcel'
 import { supabase } from './lib/supabase'
 import type {
   Atv,
@@ -1173,12 +1172,6 @@ function App(): ReactElement {
     [loadData, notify],
   )
 
-  const handleResetFinance = useCallback(async () => {
-    const deleted = await resetFinanceData()
-    notify('success', `Finanzas reiniciadas. Registros historicos eliminados: ${deleted}`)
-    await loadData()
-  }, [loadData, notify])
-
   const handleApplyLastMonthsRange = useCallback(() => {
     const months = Number.isFinite(rangeMonthsBack) ? Math.floor(rangeMonthsBack) : 1
     const safeMonths = Math.min(24, Math.max(1, months))
@@ -1190,8 +1183,8 @@ function App(): ReactElement {
     setFinanceRangeMode('range')
   }, [rangeMonthsBack])
 
-  const handleExportFinanceCsv = useCallback(() => {
-    downloadFinanceCsv({
+  const handleExportFinanceExcel = useCallback(() => {
+    downloadFinanceExcel({
       periodKey: financeRange.fileSuffix,
       periodLabel: financeRange.label,
       byAtv: financeByAtv,
@@ -1203,7 +1196,7 @@ function App(): ReactElement {
       comboFinanceRows,
       atvs,
     })
-    notify('success', `Reporte CSV descargado (${financeRange.label}).`)
+    notify('success', `Reporte Excel descargado (${financeRange.label}).`)
   }, [
     atvs,
     brincaFinanceTotal,
@@ -1381,7 +1374,6 @@ function App(): ReactElement {
           comboFinance={comboFinanceTotal}
           comboFinanceRows={comboFinanceRows}
           atvs={atvs}
-          canReset={isAdmin}
           rangeMode={financeRangeMode}
           rangeLabel={financeRange.label}
           selectedDay={selectedDay}
@@ -1398,8 +1390,7 @@ function App(): ReactElement {
           onApplyLastMonths={handleApplyLastMonthsRange}
           onSetSessionPayment={handleSetSessionPayment}
           onSetBrincaPayment={handleSetBrincaPayment}
-          onExportCsv={handleExportFinanceCsv}
-          onResetFinance={handleResetFinance}
+          onExportExcel={handleExportFinanceExcel}
           onError={(message) => notify('error', message)}
         />
       ) : null}
@@ -3095,7 +3086,6 @@ function FinanceTab(props: {
   comboFinance: ComboFinanceSummary | null
   comboFinanceRows: ComboFinanceRow[]
   atvs: Atv[]
-  canReset: boolean
   rangeMode: FinanceRangeMode
   rangeLabel: string
   selectedDay: string
@@ -3112,8 +3102,7 @@ function FinanceTab(props: {
   onApplyLastMonths: () => void
   onSetSessionPayment: (sessionId: string, paymentStatus: PaymentStatus, paymentMethod: PaymentMethod) => Promise<void>
   onSetBrincaPayment: (sessionId: string, paymentStatus: PaymentStatus, paymentMethod: PaymentMethod) => Promise<void>
-  onExportCsv: () => void
-  onResetFinance: () => Promise<void>
+  onExportExcel: () => void
   onError: (message: string) => void
 }): ReactElement {
   const {
@@ -3125,7 +3114,6 @@ function FinanceTab(props: {
     comboFinance,
     comboFinanceRows,
     atvs,
-    canReset,
     rangeMode,
     rangeLabel,
     selectedDay,
@@ -3142,8 +3130,7 @@ function FinanceTab(props: {
     onApplyLastMonths,
     onSetSessionPayment,
     onSetBrincaPayment,
-    onExportCsv,
-    onResetFinance,
+    onExportExcel,
     onError,
   } = props
   const globalSessionCount = (total?.session_count ?? 0) + (brincaTotal?.session_count ?? 0)
@@ -3209,26 +3196,6 @@ function FinanceTab(props: {
       onError(getErrorMessage(error))
     } finally {
       setSavingBrincaPaymentId(null)
-    }
-  }
-
-  async function handleResetFinance(): Promise<void> {
-    if (!canReset) {
-      onError('Solo un admin puede reiniciar finanzas.')
-      return
-    }
-
-    const confirmed = window.confirm(
-      'Esto eliminara historial financiero cerrado de Motos, Brinca y Combos. Esta seguro?',
-    )
-    if (!confirmed) {
-      return
-    }
-
-    try {
-      await onResetFinance()
-    } catch (error) {
-      onError(getErrorMessage(error))
     }
   }
 
@@ -3320,11 +3287,8 @@ function FinanceTab(props: {
               </button>
             </>
           ) : null}
-          <button type="button" className="secondary" onClick={onExportCsv}>
-            Descargar CSV
-          </button>
-          <button type="button" className="danger" disabled={!canReset} onClick={() => void handleResetFinance()}>
-            Reiniciar finanzas
+          <button type="button" className="secondary" onClick={onExportExcel}>
+            Descargar Excel
           </button>
         </div>
       </header>
