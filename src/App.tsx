@@ -24,6 +24,7 @@ import {
   fetchCompletedSessionsByRange,
   fetchMyProfile,
   fetchOpenSessions,
+  fetchRecentCompletedBrincaSessions,
   fetchRecentSessions,
   pauseBrincaSession,
   pauseSession,
@@ -491,6 +492,7 @@ function App(): ReactElement {
   const [lastClosedSessionByAtv, setLastClosedSessionByAtv] = useState<Record<string, RideSession>>({})
   const [brincaSettings, setBrincaSettings] = useState<BrincaSettings | null>(null)
   const [brincaOpenSessions, setBrincaOpenSessions] = useState<BrincaSession[]>([])
+  const [brincaRecentlyClosedSessions, setBrincaRecentlyClosedSessions] = useState<BrincaSession[]>([])
   const [brincaRecentSessions, setBrincaRecentSessions] = useState<BrincaSession[]>([])
   const [brincaFinanceTotal, setBrincaFinanceTotal] = useState<FinanceTotalRow | null>(null)
   const [comboFinanceTotal, setComboFinanceTotal] = useState<ComboFinanceSummary | null>(null)
@@ -652,6 +654,7 @@ function App(): ReactElement {
     setLastClosedSessionByAtv({})
     setBrincaSettings(null)
     setBrincaOpenSessions([])
+    setBrincaRecentlyClosedSessions([])
     setBrincaRecentSessions([])
     setBrincaFinanceTotal(null)
     setComboFinanceTotal(null)
@@ -679,6 +682,7 @@ function App(): ReactElement {
         closedSessionsRecent,
         nextBrincaSettings,
         nextBrincaOpenSessions,
+        nextBrincaRecentlyClosedSessions,
         nextBrincaCompletedSessions,
         nextBrincaClosedSessions,
         nextCombos,
@@ -692,6 +696,7 @@ function App(): ReactElement {
           fetchRecentSessions(200),
           fetchBrincaSettings(),
           fetchOpenBrincaSessions(),
+          fetchRecentCompletedBrincaSessions(100),
           fetchCompletedBrincaSessionsByRange(financeRange.startIso, financeRange.endIso),
           fetchClosedBrincaSessionsByRange(financeRange.startIso, financeRange.endIso),
           fetchCombos(500),
@@ -720,6 +725,7 @@ function App(): ReactElement {
       setLastClosedSessionByAtv(nextLastClosedByAtv)
       setBrincaSettings(nextBrincaSettings)
       setBrincaOpenSessions(nextBrincaOpenSessions)
+      setBrincaRecentlyClosedSessions(nextBrincaRecentlyClosedSessions)
       setBrincaRecentSessions(nextBrincaClosedSessions.slice(0, 120))
       setBrincaFinanceTotal(brincaTotal)
       setComboFinanceTotal(comboTotal)
@@ -1115,8 +1121,8 @@ function App(): ReactElement {
   )
 
   const handleStartBrincaSession = useCallback(
-    async (childName: string, durationMinutes: number) => {
-      const sessionId = await startBrincaSession({ childName, durationMinutes })
+    async (childName: string, durationMinutes: number, requestId: string) => {
+      const sessionId = await startBrincaSession({ childName, durationMinutes, requestId })
       notify('success', 'Sesion de Brinca iniciada')
       await loadData()
       return sessionId
@@ -1387,6 +1393,7 @@ function App(): ReactElement {
           canEdit={isAdmin}
           settings={brincaSettings}
           openSessions={brincaOpenSessions}
+          recentlyClosedSessions={brincaRecentlyClosedSessions}
           comboBrincaSessionIds={comboBrincaSessionIds}
           tickMs={tickMs}
           onUpdateSettings={handleUpdateBrincaSettings}
@@ -1942,10 +1949,11 @@ function BrincaTab(props: {
   canEdit: boolean
   settings: BrincaSettings | null
   openSessions: BrincaSession[]
+  recentlyClosedSessions: BrincaSession[]
   comboBrincaSessionIds: ReadonlySet<string>
   tickMs: number
   onUpdateSettings: (baseMinutes: number, basePriceCop: number) => Promise<void>
-  onStartSession: (childName: string, durationMinutes: number) => Promise<string>
+  onStartSession: (childName: string, durationMinutes: number, requestId: string) => Promise<string>
   onPauseSession: (sessionId: string) => Promise<void>
   onResumeSession: (sessionId: string) => Promise<void>
   onExtendSession: (sessionId: string, extraMinutes: number) => Promise<void>
@@ -1958,6 +1966,7 @@ function BrincaTab(props: {
     canEdit,
     settings,
     openSessions,
+    recentlyClosedSessions,
     comboBrincaSessionIds,
     tickMs,
     onUpdateSettings,
@@ -1980,9 +1989,22 @@ function BrincaTab(props: {
   const [savingSettings, setSavingSettings] = useState(false)
   const [busySessionId, setBusySessionId] = useState<string | null>(null)
   const [startingSession, setStartingSession] = useState(false)
+  const startingSessionRef = useRef(false)
+  const startRequestIdRef = useRef<string | null>(null)
   const [paymentDraftBySessionId, setPaymentDraftBySessionId] = useState<
     Record<string, { status: PaymentStatus; method: PaymentMethod }>
   >({})
+  const visibleRecentlyClosedSessions = useMemo(() => {
+    return recentlyClosedSessions.filter((session) => {
+      if (!session.ended_at) {
+        return false
+      }
+
+      const endedAtMs = new Date(session.ended_at).getTime()
+      const elapsedMs = tickMs - endedAtMs
+      return Number.isFinite(endedAtMs) && elapsedMs >= 0 && elapsedMs <= RECENT_FINISH_SIGNAL_MS
+    })
+  }, [recentlyClosedSessions, tickMs])
 
   function getPaymentDraft(session: BrincaSession): { status: PaymentStatus; method: PaymentMethod } {
     return paymentDraftBySessionId[session.id] ?? { status: session.payment_status, method: session.payment_method }
@@ -2008,6 +2030,10 @@ function BrincaTab(props: {
 
   async function handleStartSession(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
+    if (startingSessionRef.current) {
+      return
+    }
+
     const name = childName.trim()
     if (!name) {
       onError('Debes escribir el nombre del nino.')
@@ -2021,14 +2047,23 @@ function BrincaTab(props: {
       return
     }
 
+    const requestId = startRequestIdRef.current ?? window.crypto.randomUUID()
+    startRequestIdRef.current = requestId
+    startingSessionRef.current = true
     setStartingSession(true)
     try {
-      const sessionId = await onStartSession(name, duration)
-      await onSetSessionPayment(sessionId, startPaymentStatus, startPaymentStatus === 'paid' ? startPaymentMethod : null)
+      const sessionId = await onStartSession(name, duration, requestId)
+      startRequestIdRef.current = null
       setChildName('')
+      try {
+        await onSetSessionPayment(sessionId, startPaymentStatus, startPaymentStatus === 'paid' ? startPaymentMethod : null)
+      } catch (error) {
+        onError(`La sesion inicio, pero no se pudo actualizar el pago: ${getErrorMessage(error)}`)
+      }
     } catch (error) {
       onError(getErrorMessage(error))
     } finally {
+      startingSessionRef.current = false
       setStartingSession(false)
     }
   }
@@ -2391,6 +2426,40 @@ function BrincaTab(props: {
           })
         )}
       </div>
+
+      {visibleRecentlyClosedSessions.length > 0 ? (
+        <>
+          <header className="recent-section-header">
+            <h3>Brinca recien cerradas</h3>
+            <p className="muted">Se mantienen visibles durante 15 minutos para consulta rapida.</p>
+          </header>
+          <div className="card-grid">
+            {visibleRecentlyClosedSessions.map((session) => (
+              <article key={session.id} className="atv-card recent-finished">
+                <header>
+                  <h3>{session.child_name}</h3>
+                  <span className="badge finished">Finalizada</span>
+                </header>
+                <p className="meta">ID transaccion: {shortTransactionId(session.id)}</p>
+                <p className="meta">Inicio: {formatDateTime(session.started_at)}</p>
+                <p className="meta">
+                  Termino {formatTimeAgo(session.ended_at ?? session.target_end_at, tickMs)} (
+                  {formatDateTime(session.ended_at)})
+                </p>
+                <p className="meta">
+                  Tiempo cobrado: {formatMinutes(session.minutes_billed ?? 0)} | Valor:{' '}
+                  {formatCurrencyCop(session.amount_cop ?? 0)}
+                </p>
+                <p className="meta">
+                  Pago: {paymentStatusLabel(session.payment_status)} | Medio: {paymentMethodLabel(session.payment_method)}
+                </p>
+                {comboBrincaSessionIds.has(session.id) ? <p className="meta">Sesion perteneciente a combo.</p> : null}
+                <p className="recent-finish-indicator">Tiempo finalizado recientemente</p>
+              </article>
+            ))}
+          </div>
+        </>
+      ) : null}
 
     </section>
   )

@@ -374,6 +374,21 @@ export async function fetchOpenBrincaSessions(): Promise<BrincaSession[]> {
   return (data ?? []) as BrincaSession[]
 }
 
+export async function fetchRecentCompletedBrincaSessions(limit = 100): Promise<BrincaSession[]> {
+  const { data, error } = await supabase
+    .from('brinca_sessions')
+    .select(brincaSessionColumns)
+    .eq('status', 'completed')
+    .order('ended_at', { ascending: false, nullsFirst: false })
+    .limit(limit)
+
+  if (error) {
+    throw error
+  }
+
+  return (data ?? []) as BrincaSession[]
+}
+
 export async function fetchCompletedBrincaSessionsByRange(startIso: string, endIso: string): Promise<BrincaSession[]> {
   const { data, error } = await supabase
     .from('brinca_sessions')
@@ -409,10 +424,12 @@ export async function fetchClosedBrincaSessionsByRange(startIso: string, endIso:
 export async function startBrincaSession(input: {
   childName: string
   durationMinutes: number
+  requestId: string
 }): Promise<string> {
   const { data, error } = await supabase.rpc('start_brinca_session', {
     p_child_name: input.childName,
     p_duration_minutes: input.durationMinutes,
+    p_request_id: input.requestId,
   })
 
   if (error) {

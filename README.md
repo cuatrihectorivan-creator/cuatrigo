@@ -57,6 +57,7 @@ Revisa:
 - `supabase/migrations/0013_payment_status_and_method.sql`
 - `supabase/migrations/0014_hard_cap_stop_and_self_heal_start.sql`
 - `supabase/migrations/0015_combo_payment_sync.sql`
+- `supabase/migrations/0016_brinca_start_idempotency.sql`
 - `supabase/README.md`
 
 ## Deploy en Cloudflare Pages

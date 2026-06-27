@@ -385,6 +385,11 @@ select:focus {
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
+input::placeholder {
+  color: var(--muted);
+  opacity: 0.72;
+}
+
 label {
   display: grid;
   gap: 0.34rem;
@@ -420,6 +425,12 @@ thead th {
   display: grid;
   place-items: center;
   gap: 1rem;
+}
+
+.splash .theme-toggle {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
 }
 
 .auth-layout {
@@ -637,7 +648,7 @@ thead th {
 .panel {
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);
-  background: linear-gradient(170deg, rgba(17, 29, 67, 0.9), rgba(13, 24, 58, 0.87));
+  background: linear-gradient(170deg, var(--surface-start), var(--surface-end));
   box-shadow: var(--shadow);
   backdrop-filter: blur(12px);
   padding: 1rem;
@@ -648,6 +659,12 @@ thead th {
 .panel-header {
   display: grid;
   gap: 0.35rem;
+}
+
+.recent-section-header {
+  display: grid;
+  gap: 0.3rem;
+  padding-top: 0.25rem;
 }
 
 .finance-controls {
@@ -669,15 +686,15 @@ thead th {
 
 .atv-card {
   border-radius: var(--radius-md);
-  border: 1px solid rgba(113, 156, 247, 0.33);
-  background: linear-gradient(160deg, rgba(17, 31, 74, 0.9), rgba(13, 25, 59, 0.88));
+  border: 1px solid var(--card-border);
+  background: linear-gradient(160deg, var(--surface-start), var(--surface-end));
   padding: 0.84rem;
   display: grid;
   gap: 0.56rem;
 }
 
 .atv-card:hover {
-  border-color: rgba(145, 193, 255, 0.52);
+  border-color: var(--card-hover);
 }
 
 .combo-card {
@@ -685,12 +702,12 @@ thead th {
 }
 
 .combo-leg {
-  border: 1px solid rgba(102, 147, 235, 0.26);
+  border: 1px solid var(--subcard-border);
   border-radius: 10px;
   padding: 0.65rem;
   display: grid;
   gap: 0.4rem;
-  background: rgba(10, 19, 49, 0.48);
+  background: var(--subcard-bg);
 }
 
 .combo-leg-row {
@@ -711,8 +728,8 @@ thead th {
   overflow: hidden;
   position: relative;
   isolation: isolate;
-  border: 1px solid rgba(102, 151, 255, 0.34);
-  background: linear-gradient(145deg, rgba(3, 11, 36, 0.9), rgba(6, 16, 44, 0.9));
+  border: 1px solid var(--image-border);
+  background: linear-gradient(145deg, var(--image-start), var(--image-end));
 }
 
 .atv-image {
@@ -741,15 +758,15 @@ thead th {
 }
 
 .atv-card.expired {
-  border-color: rgba(255, 129, 163, 0.58);
-  background: linear-gradient(165deg, rgba(59, 24, 46, 0.84), rgba(39, 16, 39, 0.84));
+  border-color: var(--finished-border);
+  background: linear-gradient(165deg, var(--expired-start), var(--expired-end));
 }
 
 .atv-card.recent-finished {
-  border-color: rgba(255, 108, 139, 0.62);
+  border-color: var(--finished-border);
   box-shadow:
-    0 0 0 1px rgba(255, 108, 139, 0.28),
-    0 16px 34px rgba(127, 22, 48, 0.46);
+    0 0 0 1px var(--finished-border),
+    0 16px 34px var(--recent-shadow);
 }
 
 .atv-card header {
@@ -770,7 +787,7 @@ thead th {
   height: 0.8rem;
   border-radius: 999px;
   margin-right: 0.4rem;
-  border: 1px solid rgba(240, 248, 255, 0.46);
+  border: 1px solid var(--chip-border);
   vertical-align: -0.08rem;
 }
 
@@ -784,19 +801,19 @@ thead th {
   width: 1rem;
   height: 1rem;
   border-radius: 4px;
-  border: 1px solid rgba(240, 248, 255, 0.58);
-  box-shadow: 0 0 0 1px rgba(50, 98, 188, 0.24);
+  border: 1px solid var(--chip-border);
+  box-shadow: 0 0 0 1px var(--border);
 }
 
 .clock {
   font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-size: 1.08rem;
   font-weight: 700;
-  color: #dbebff;
+  color: var(--clock);
 }
 
 .danger-text {
-  color: #ff9cb1;
+  color: var(--error-text);
 }
 
 .badge {
@@ -809,33 +826,33 @@ thead th {
 }
 
 .badge.ok {
-  color: #4de39f;
-  background: rgba(21, 89, 61, 0.35);
-  border-color: rgba(72, 220, 151, 0.42);
+  color: var(--ok-text);
+  background: var(--ok-bg);
+  border-color: var(--ok-border);
 }
 
 .badge.busy {
-  color: #7ac5ff;
-  background: rgba(32, 82, 145, 0.36);
-  border-color: rgba(110, 180, 255, 0.46);
+  color: var(--busy-text);
+  background: var(--busy-bg);
+  border-color: var(--busy-border);
 }
 
 .badge.paused {
-  color: #ffd891;
-  background: rgba(120, 79, 22, 0.33);
-  border-color: rgba(255, 201, 100, 0.45);
+  color: var(--paused-text);
+  background: var(--paused-bg);
+  border-color: var(--paused-border);
 }
 
 .badge.finished {
-  color: #ffadc1;
-  background: rgba(120, 28, 54, 0.34);
-  border-color: rgba(255, 126, 156, 0.5);
+  color: var(--finished-text);
+  background: var(--finished-bg);
+  border-color: var(--finished-border);
 }
 
 .badge.inactive {
-  color: #ffd08d;
-  background: rgba(107, 62, 19, 0.3);
-  border-color: rgba(255, 182, 85, 0.42);
+  color: var(--inactive-text);
+  background: var(--inactive-bg);
+  border-color: var(--inactive-border);
 }
 
 .inline-form {
@@ -848,7 +865,7 @@ thead th {
 .table-wrap {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
-  border: 1px solid rgba(98, 135, 214, 0.28);
+  border: 1px solid var(--border);
   border-radius: 12px;
 }
 
@@ -867,13 +884,13 @@ thead th {
   align-items: center;
   gap: 0.45rem;
   width: fit-content;
-  color: #ffb8c9;
+  color: var(--finished-text);
   font-size: 0.86rem;
   font-weight: 600;
-  border: 1px solid rgba(255, 117, 150, 0.44);
+  border: 1px solid var(--finished-border);
   border-radius: 999px;
   padding: 0.25rem 0.6rem;
-  background: rgba(105, 21, 46, 0.32);
+  background: var(--finished-bg);
 }
 
 .recent-finish-indicator::before {
@@ -919,6 +936,27 @@ thead th {
 .toast.error {
   background: linear-gradient(120deg, #c74566, #ea587a);
   border-color: rgba(255, 166, 191, 0.45);
+}
+
+.auth-card,
+.topbar,
+.tabs,
+.summary-card,
+.brinca-rate-card,
+.panel,
+.atv-card,
+.combo-leg,
+.atv-image-wrap,
+.table-wrap,
+input,
+select,
+button.secondary,
+thead th {
+  transition:
+    color 180ms ease,
+    border-color 180ms ease,
+    background 220ms ease,
+    box-shadow 220ms ease;
 }
 
 @media (max-width: 960px) {
@@ -1036,7 +1074,7 @@ thead th {
 
   table.responsive-table tr {
     padding: 0.55rem 0.25rem;
-    border-bottom: 1px solid rgba(127, 163, 248, 0.2);
+    border-bottom: 1px solid var(--line);
   }
 
   table.responsive-table tr:last-child {
@@ -1054,7 +1092,7 @@ thead th {
 
   table.responsive-table td::before {
     content: attr(data-label);
-    color: #afc3e9;
+    color: var(--table-heading);
     font-weight: 600;
     font-size: 0.78rem;
     text-transform: uppercase;

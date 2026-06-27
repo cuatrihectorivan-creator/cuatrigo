@@ -31,6 +31,7 @@ Aplica en orden:
 14. `supabase/migrations/0013_payment_status_and_method.sql`
 15. `supabase/migrations/0014_hard_cap_stop_and_self_heal_start.sql`
 16. `supabase/migrations/0015_combo_payment_sync.sql`
+17. `supabase/migrations/0016_brinca_start_idempotency.sql`
 
 Puedes hacerlo desde SQL Editor o con Supabase CLI.
 
