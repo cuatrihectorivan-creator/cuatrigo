@@ -18,7 +18,7 @@ declare
   v_now timestamptz := timezone('utc', clock_timestamp());
 begin
   if auth.uid() is null then
-    raise exception 'No autenticado';
+    raise exception 'No autenticado';git
   end if;
 
   if p_duration_minutes is null or p_duration_minutes <= 0 then

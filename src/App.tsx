@@ -193,15 +193,28 @@ function shiftMonthKey(monthKey: string, deltaMonths: number): string {
 }
 
 type FinanceRangeMode = 'today' | 'day' | 'month' | 'range'
+type Theme = 'light' | 'dark'
 
 type Tab = 'operations' | 'brinca' | 'combos' | 'atvs' | 'finance'
 type ToastType = 'error' | 'success'
+const THEME_STORAGE_KEY = 'cuatrigo-theme'
 const RECENT_FINISH_SIGNAL_MS = 15 * 60 * 1000
 const COMBO_HISTORY_VISIBILITY_MS = 5 * 60 * 1000
 
 interface ToastState {
   type: ToastType
   message: string
+}
+
+function getInitialTheme(): Theme {
+  if (typeof window === 'undefined') {
+    return 'light'
+  }
+
+  const storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY)
+  const theme: Theme = storedTheme === 'dark' ? 'dark' : 'light'
+  document.documentElement.dataset.theme = theme
+  return theme
 }
 
 function getErrorMessage(error: unknown): string {
@@ -352,13 +365,43 @@ async function playExpirySound(): Promise<void> {
   }
 }
 
+function ThemeToggle(props: { theme: Theme; onToggle: () => void }): ReactElement {
+  const { theme, onToggle } = props
+  const isDark = theme === 'dark'
+
+  return (
+    <button
+      type="button"
+      className="secondary theme-toggle"
+      onClick={onToggle}
+      aria-label={isDark ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
+      aria-pressed={isDark}
+      title={isDark ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
+    >
+      {isDark ? (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.66 6.34l1.41-1.41" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M20.4 15.3A8.5 8.5 0 0 1 8.7 3.6 8.5 8.5 0 1 0 20.4 15.3Z" />
+        </svg>
+      )}
+      <span>{isDark ? 'Modo claro' : 'Modo oscuro'}</span>
+    </button>
+  )
+}
+
 function LoginPanel(props: {
   pending: boolean
   error: string | null
+  theme: Theme
+  onToggleTheme: () => void
   onSignIn: (email: string, password: string) => Promise<void>
   onSignUp: (email: string, password: string) => Promise<void>
 }): ReactElement {
-  const { pending, error, onSignIn, onSignUp } = props
+  const { pending, error, theme, onToggleTheme, onSignIn, onSignUp } = props
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
 
@@ -374,6 +417,9 @@ function LoginPanel(props: {
   return (
     <main className="auth-layout">
       <section className="auth-card">
+        <div className="auth-actions">
+          <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+        </div>
         <div className="auth-brand">
           <span className="brand-mark" aria-hidden="true">
             <img src="/atv-kid-blue.png" alt="" className="brand-mark-img" loading="lazy" />
@@ -427,6 +473,7 @@ function LoginPanel(props: {
 }
 
 function App(): ReactElement {
+  const [theme, setTheme] = useState<Theme>(getInitialTheme)
   const [authReady, setAuthReady] = useState(false)
   const [user, setUser] = useState<User | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
@@ -555,6 +602,16 @@ function App(): ReactElement {
     }
   }, [financeRangeMode, rangeEndDay, rangeStartDay, selectedDay, selectedMonth])
   const vibrationSupported = typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function'
+
+  const handleToggleTheme = useCallback(() => {
+    setTheme((current) => (current === 'light' ? 'dark' : 'light'))
+  }, [])
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    document.documentElement.style.colorScheme = theme
+    window.localStorage.setItem(THEME_STORAGE_KEY, theme)
+  }, [theme])
 
   const notify = useCallback((type: ToastType, message: string) => {
     setToast({ type, message })
@@ -1214,13 +1271,23 @@ function App(): ReactElement {
   if (!authReady) {
     return (
       <main className="splash">
+        <ThemeToggle theme={theme} onToggle={handleToggleTheme} />
         <p>Cargando autenticacion...</p>
       </main>
     )
   }
 
   if (!userId || !user) {
-    return <LoginPanel pending={authPending} error={authError} onSignIn={handleSignIn} onSignUp={handleSignUp} />
+    return (
+      <LoginPanel
+        pending={authPending}
+        error={authError}
+        theme={theme}
+        onToggleTheme={handleToggleTheme}
+        onSignIn={handleSignIn}
+        onSignUp={handleSignUp}
+      />
+    )
   }
 
   return (
@@ -1235,6 +1302,7 @@ function App(): ReactElement {
         </div>
 
         <div className="topbar-actions">
+          <ThemeToggle theme={theme} onToggle={handleToggleTheme} />
           <button
             type="button"
             className={`secondary ${soundArmed ? 'is-armed' : ''}`}
