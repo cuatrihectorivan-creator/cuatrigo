@@ -2507,7 +2507,7 @@ function CombosTab(props: {
   const [childName, setChildName] = useState('')
   const [startMode, setStartMode] = useState<ComboStartMode>('either')
   const [selectedAtvId, setSelectedAtvId] = useState('')
-  const [motoDurationMinutes, setMotoDurationMinutes] = useState(10)
+  const [motoDurationMinutes, setMotoDurationMinutes] = useState(15)
   const [brincaDurationMinutes, setBrincaDurationMinutes] = useState(15)
   const [creating, setCreating] = useState(false)
   const [busyComboId, setBusyComboId] = useState<string | null>(null)
@@ -2617,7 +2617,7 @@ function CombosTab(props: {
       await onCreateCombo({
         childName: name,
         startMode,
-        motoDurationMinutes: Math.max(1, Math.floor(motoDurationMinutes || 10)),
+        motoDurationMinutes: Math.max(1, Math.floor(motoDurationMinutes || 15)),
         brincaDurationMinutes: Math.max(1, Math.floor(brincaDurationMinutes || brincaSettings?.base_minutes || 15)),
         atvId: selectedAtvId || null,
       })
@@ -2685,7 +2685,7 @@ function CombosTab(props: {
         <p className="muted">
           Crea combos para un nino (Moto + Brinca), elige que inicia primero y dispara cada parte cuando toque.
         </p>
-        <p className="muted">Tarifa combo: Moto 10 min = 8000 COP, Brinca 15 min = 5000 COP.</p>
+        <p className="muted">Tarifa combo: Moto 15 min = 8000 COP, Brinca 15 min = 5000 COP.</p>
         <p className="muted">Pago combo unificado: al marcar pagado/pending se sincronizan Moto y Brinca.</p>
         <p className="muted">Los combos completados o cancelados se ocultan automaticamente despues de 5 minutos.</p>
       </header>
